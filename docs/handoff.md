@@ -29,7 +29,7 @@ Five bounded contexts, each with its own lifecycle:
 
 | Context | Owns | Notes |
 | --- | --- | --- |
-| Configuration | `ConfigRevision`, `AuthSpec` | Desired state; revisions immutable, content-hashed |
+| Configuration | `Manifest`, `Revision`, `AuthSpec` | Desired state; manifests content-addressed, revisions append-only |
 | Runtime | `AuthInstance`, `Deployment` | Actual state: `Starting → Healthy → Draining → Stopped \| Crashed` |
 | Control | Plan, apply, rollback, status, logs, export, import | Exposed through the control API |
 | Presentation | `BrandingSpec`, hosted pages, email templates | Separate lifecycle; changes applied hot |
@@ -38,18 +38,26 @@ Five bounded contexts, each with its own lifecycle:
 Type sketch (design level, not final):
 
 ```ts
-type ConfigRevision = {
-  id: RevisionId;            // hash of canonical manifest
-  parent?: RevisionId;
-  createdAt: Date;
-  author: OperatorId;
+// Content: what the config says. Same content, same digest, whoever wrote it.
+type Manifest = {
   auth: AuthSpec;            // serializable, no functions
   branding: BrandingSpec;
+};
+type ManifestDigest = string; // hash of the canonical serialization of a Manifest
+
+// Event: someone applied a manifest at a point in time.
+type Revision = {
+  id: RevisionId;            // unique per event, not derived from content
+  parent?: RevisionId;       // the revision that was active when this one was planned
+  manifest: ManifestDigest;
+  createdAt: Date;
+  author: OperatorId;
+  reason?: string;           // "rollback to r41", "add passkeys"
 };
 
 type AuthSpec = {
   baseURL: string;
-  secret: SecretRef;
+  secrets: VersionedSecret[]; // Better Auth `secrets`; newest version signs, older ones still verify
   database: DatabaseSpec;
   emailAndPassword?: { enabled: boolean; requireVerification?: boolean };
   socialProviders: Record<ProviderId, { clientId: SecretRef; clientSecret: SecretRef }>;
@@ -58,8 +66,9 @@ type AuthSpec = {
 };
 
 type SecretRef = { env: string } | { file: string };
+type VersionedSecret = { version: number; value: SecretRef };
 
-type ChangeImpact = "hot" | "restart" | "migration" | "destructive";
+type ChangeImpact = "hot" | "restart" | "migration" | "manual" | "destructive";
 type PlanStep = { path: string; before: unknown; after: unknown; impact: ChangeImpact };
 
 type Deployment = {
@@ -69,6 +78,10 @@ type Deployment = {
 };
 ```
 
+**Manifest vs. revision.** This is git's split between a tree and a commit. A `Manifest` is pure content, so its digest is stable: exporting, re-importing or reverting to the same config always yields the same digest, and "is what's running what I exported?" is one hash comparison. A `Revision` is the history event that points at a manifest, so a rollback is a new revision (new id, new author, new time) whose `manifest` equals an older revision's. An earlier draft used the manifest hash as the revision id, which made a rollback collide with the revision it restored and left no place for who did it and why.
+
+**Secrets are invisible to the digest.** A manifest holds `SecretRef`s, never values, so changing the value behind `{ env: "AUTH_SECRET" }` doesn't change the digest and `plan()` over manifests can't see it. The deployment therefore records a **secret fingerprint** per ref at apply time (an HMAC of the resolved value under a per-install key, never the value itself). `plan` compares current fingerprints against the active revision's and reports "value changed behind ref X" as its own step. Fingerprints live in the lock, not the manifest, so they never leak into the digest or into a Git-committed file.
+
 **Functions don't serialize.** `betterAuth()` takes callbacks (email senders, hooks, plugin callbacks). The config references them by name through a **capability registry** of prebuilt behaviors (`email.smtp`, `email.resend`, `webhook.post`) with parameters. A **plugin registry** maps each plugin `kind` to a factory plus a Zod schema for its options.
 
 ## Orchestrator runtime
@@ -77,10 +90,10 @@ The container runs the orchestrator as PID 1: supervisor, reverse proxy and cont
 
 ### Apply flow
 
-1. Validate the desired revision against the Zod schemas; check every `SecretRef` resolves.
-2. Compute the plan and classify each step's impact. Destructive steps need explicit confirmation.
+1. Validate the desired manifest against the Zod schemas; check every `SecretRef` resolves and fingerprint it.
+2. Compute the plan: config diff, secret fingerprint diff, and Better Auth's migration dry run (see Migrations). Classify each step's impact. Destructive steps need explicit confirmation; manual steps block the apply.
 3. Write the artifact bundle (see Artifacts). Failure here fails the apply.
-4. Run schema migrations if any plugin changes need them.
+4. Run Better Auth's additive migrations while the old worker is still serving (safe by construction, see Migrations).
 5. Spawn the new worker on a fresh internal port and health-check it.
 6. Switch the proxy upstream, then drain and stop the old worker.
 7. Record the revision as active. On failure at any step, the old worker keeps serving.
@@ -90,11 +103,29 @@ The container runs the orchestrator as PID 1: supervisor, reverse proxy and cont
 | Impact | Examples | Handling |
 | --- | --- | --- |
 | hot | Branding, copy | No process change |
-| restart | New social provider, rate limits | Blue/green swap |
-| migration | Plugin added (organization, 2FA) | Migrate, then swap |
-| destructive | `secret` rotated (kills all sessions), plugin removed (orphans data) | Explicit confirmation |
+| restart | New social provider, rate limits, new secret version added | Blue/green swap |
+| migration | Plugin added (organization, 2FA) | Additive migrate, then swap |
+| manual | Better Auth upgrade with a data step, a renamed field or table, a required column with no default on a populated table | Apply refused until the operator runs the documented step and re-plans |
+| destructive | Plugin removed (its tables stay but go unused), last secret version removed, secret value changed behind the same ref (both log everyone out) | Explicit confirmation |
 
-Sessions live in the database, so a normal restart logs nobody out.
+Sessions live in the database, so a normal restart logs nobody out. Rotating the secret is a `restart`, not a `destructive` change, as long as it's done by adding a version: Better Auth's versioned `secrets` (or `BETTER_AUTH_SECRETS`) sign with the newest version and still verify older ones, and lazily re-encrypt on write. Dropping the old version later is the step that invalidates what it signed.
+
+### Migrations
+
+Better Auth owns its schema, and its migrator (`getMigrations(options)` from `better-auth/db/migration`, the same code the `auth migrate` CLI runs) is **additive only**: it creates missing tables, adds missing columns and indexes, and never drops, renames or retypes anything. A type mismatch is only logged as a warning. It refuses (`UnsafeMigrationError`) to add a required column with no default to a table that already has rows. It only works with the built-in Kysely adapter, which is what the orchestrator uses.
+
+That shapes the whole design:
+
+- **Plugin changes are safe during blue/green.** The old worker ignores tables and columns it doesn't know, so migrating before the swap can't break it. This is the expand half of expand/contract, and it is the only half the orchestrator ever runs automatically.
+- **`plan` runs the migrator as a dry run.** `getMigrations(..., { throwOnUnsafe: false })` returns `toBeCreated`, `toBeAdded` and `unsafeChanges` without touching the database. The plan shows the tables and columns as `migration` steps and each unsafe change as a `manual` step.
+- **Breaking changes come from outside the migrator.** The migrator can't express them, so it never runs them:
+  - Better Auth upgrades with data steps. The 1.7 upgrade guide, for example, requires copying `oauthApplication` rows into the new `oauthClient` table and remapping Microsoft account ids to `oid`. The CLI adds the new tables but copies nothing.
+  - Renaming a field or table through Better Auth's `fields`/`modelName` options. The migrator adds the new column and silently strands the old data.
+  - Contract steps: dropping a removed plugin's tables, or tightening a column to `NOT NULL`.
+  
+  The plugin registry and the version lock declare these as known `manual` steps per version or option, with the guide link and the SQL to review. The orchestrator never runs them on its own in v1.
+- **Rollback is a new apply of an older manifest.** Because migrations only add, rolling back config is always schema-safe: the older worker ignores the extra tables. The exception is a Better Auth version rollback after a data step, which `plan` marks `manual`.
+- **The worker caches its schema check** until it restarts (portal hit this), so a migration only takes effect for the new worker, which is another reason migrations run before the swap and never against a live worker.
 
 **Alternative considered:** swapping the `auth` handler in-process. It's simpler and has zero downtime, but a bad config can crash the orchestrator. The child-process design was preferred for crash isolation.
 
@@ -152,8 +183,9 @@ Every apply writes a bundle so that, given the bundle and the same database, any
 
 | File | Purpose |
 | --- | --- |
-| `manifest.json` | Full resolved AuthSpec + BrandingSpec, secret refs only, canonical serialization. Its hash is the revision ID. Same format as file-mode config. |
-| `lock.json` | Orchestrator image digest, Better Auth version, each plugin's version, registry schema version |
+| `manifest.json` | Full resolved AuthSpec + BrandingSpec, secret refs only, canonical serialization. Its hash is the manifest digest. Same format as file-mode config. |
+| `revision.json` | Revision id, parent, author, time, reason, manifest digest |
+| `lock.json` | Orchestrator image digest, Better Auth version, each plugin's version, registry schema version, secret fingerprints per ref |
 | `secrets.required.json` + `.env.example` | Every referenced secret with a description |
 | `migrations/` | SQL this revision needs, reviewable by a DBA |
 | `branding/` | Tokens, message bundles, custom CSS, assets, content-hashed |
@@ -167,7 +199,7 @@ The eject file removes lock-in: anyone can leave the orchestrator and embed Bett
 
 - Order: bundle written before migration and traffic switch; a write failure fails the apply.
 - Atomic: write to a temp directory, then rename.
-- Location: `/artifacts/<revision-hash>/` on a volume, plus revision history and hashes in the database. Bundles are deterministic, so a lost volume can be regenerated.
+- Location: `/artifacts/<revision-id>/` on a volume, plus revision history and hashes in the database. Bundles are deterministic, so a lost volume can be regenerated.
 - `/artifacts/current` symlinks to the active revision.
 - Retention: keep all by default, optional `keepLast: n`; never prune the active revision or its parent.
 - Artifacts never contain user data or PII.
@@ -176,7 +208,7 @@ The eject file removes lock-in: anyone can leave the orchestrator and embed Bett
 
 - `export <revision>` returns a bundle; `import <bundle>` runs through the normal plan and apply flow.
 - Exporting from a console-configured instance and committing `manifest.json` to Git is the migration path to file mode.
-- Recording or signing each bundle's hash lets you verify later that what's running matches what was exported.
+- `manifest.json` and `lock.json` together answer "is what's running what I exported?": same manifest digest, same lock (image, versions, secret fingerprints). Recording or signing each bundle's hash lets you verify later that what's running matches what was exported.
 
 ## Admin console and identity administration
 
@@ -239,7 +271,8 @@ Because the auth server is an IdP, it owns the login pages (users are redirected
 - [ ] Which Better Auth version to pin, and which plugins ship in the first registry?
 - [ ] Which databases to support at launch (Postgres only, or also MySQL and SQLite)?
 - [ ] oRPC or tRPC for the contract?
-- [ ] How to run migrations programmatically from the orchestrator (Better Auth CLI vs. its migration API)?
+- [x] How to run migrations programmatically? `getMigrations()` from `better-auth/db/migration`, dry run in `plan`, run in `apply` (see Migrations).
+- [ ] Should the orchestrator ever run contract steps (drop orphaned plugin tables) itself, or always leave them to the operator?
 - [ ] Hosted pages: web components or SSR, and which framework for the web console?
 - [ ] Which prebuilt capabilities (email providers, webhooks) are in v1?
 - [ ] Default `configSource` for new deployments?
