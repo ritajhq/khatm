@@ -104,6 +104,13 @@ type SessionContract = {
   claims: string[];            // user fields exposed: ["username", "email", "name", "emailVerified", "role"]
 };
 
+// Every dialect Better Auth's programmatic migrator supports (its built-in Kysely adapter).
+type DatabaseSpec = {
+  dialect: "postgres" | "mysql" | "sqlite" | "mssql";
+  url: SecretRef;
+  schema?: string;           // Postgres and MSSQL only: where Better Auth's tables live ("auth" in portal)
+};
+
 type SecretRef = { env: string } | { file: string };
 type VersionedSecret = { version: number; value: SecretRef };
 
@@ -247,7 +254,8 @@ That shapes the whole design:
 ### State and secrets
 
 - Auth data lives in the operator's database.
-- Config revisions, plans, the apply lock and the audit log live in the same database in their own `khatm` schema, so the container is stateless apart from the database.
+- Config revisions, plans, the apply lock and the audit log live in the same database, next to Better Auth's tables but never visible to its migrator: in a `khatm` schema on Postgres and MSSQL, and as `khatm_`-prefixed tables on MySQL and SQLite, which have no separate schemas. The apply lock is a lease row, so it works the same on every dialect.
+- With Postgres, MySQL or MSSQL the container is stateless apart from the database. With SQLite the database is a file on a volume that both workers open during a swap, so khatm turns on WAL mode and SQLite suits single-host deployments only.
 - Secrets come only from env vars or mounted files. The config holds references, never values.
 - Branding assets are stored in the database as blobs, so a database backup covers everything.
 
@@ -291,7 +299,7 @@ khatm is an Ensemble project, so the split follows Ensemble's rule: `core` speak
 | `source/ship/khatm` | The auth image: orchestrator and worker | — |
 | `source/ship/console` | The console image | — |
 | `source/ship/guard/control` | The idhn guard manifest for the control API, one action per contract procedure | Consumers' idhn deployment |
-| `ci/khatm/delivery.yml` | Dev stack: Postgres plus khatm, run with `ens develop khatm` | Contributors |
+| `ci/khatm/delivery.yml` | Dev stack: Postgres plus khatm, run with `ens develop khatm`. Other dialects are tested against their own database entries | Contributors |
 
 Consumers deploy khatm as two `compute` entries in their own delivery manifest: `khatm` with one replica and `khatm-console` with as many as they like, each behind an idhn guard. For portal, they replace today's `auth` and `auth-web` computes and the `auth-migrate` and `grant-admin` tasks.
 
@@ -305,7 +313,7 @@ khatm authenticates and idhn authorizes, for khatm's own surfaces exactly as for
 - **Control API over HTTP.** An idhn guard sits in front of the control port. khatm ships its guard manifest (`source/ship/guard/control`): one action per contract procedure (`khatm.plan`, `khatm.apply`, `users.ban`, ...) with the facts policies need, such as the target user id. The policies are the consumer's. The orchestrator reads the caller from `x-idhn-subject` for revisions and the audit log, and trusts nothing else about them.
 - **CLI.** In v1 the CLI talks only over the Unix socket (`docker exec`, or `kubectl exec` on Kubernetes), so whoever can exec into the container can operate khatm. A remote CLI over HTTP comes later and needs two pieces:
   - khatm derives Better Auth's `deviceAuthorization` and `bearer` plugins. `khatm login` prints a code, the operator approves it in the browser, and `/device/token` returns a raw session token, which the CLI sends as `Authorization: Bearer`.
-  - idhn gains a `session-bearer` scheme. It works like `session-cookie`, but reads the bearer header and forwards it to `session_url`, where the bearer plugin turns it into a session. The raw token can't ride in the cookie instead, because `get-session` only accepts a signed cookie and the device flow never sets one.
+  - idhn gains a `session-bearer` scheme. It works like `session-cookie`, but reads the bearer header and forwards it to `session_url`, where the bearer plugin turns it into a session. The control API's guard must accept both the console's cookie and the CLI's bearer header. This idhn change is being built in parallel on idhn's `feat/session-bearer` branch. The raw token can't ride in the cookie instead, because `get-session` only accepts a signed cookie and the device flow never sets one.
 - **Unix socket** (`docker exec khatm khatm plan`): trusted by filesystem access, no guard. It is the break-glass path when a bad config breaks sign-in, and every use is audited as the `socket` subject.
 
 Contract namespaces: `revisions.*`, `plan`, `apply`, `rollback`, `status`, `logs.stream`, `branding.preview`, `export`, `import`, `users.*`, `sessions.*`, `orgs.*`, `audit.*`.
@@ -363,6 +371,7 @@ The console runs in its own container so it can run as many instances as needed:
 - **Stateless.** It holds no config, lock or session state. Every read and write goes through the control API, so the orchestrator stays the single writer and the apply lock still covers every change.
 - **Sessions come from the auth server.** The console is a first-party `Application` (derived when the console is enabled), so the shared session cookie reaches it like any portal app.
 - **Streams are per viewer.** Each instance opens its own `logs.stream` and status subscriptions to the orchestrator, and nothing is shared between instances.
+- **UI reference: [Better Auth Console](https://better-auth-console.com)** ([repo](https://github.com/arc0ai/better-auth-console), MIT, built with shadcn). Follow its screens and layout: a dashboard with signup and session analytics, user management (create, ban, delete), sessions, linked OAuth accounts, organizations and teams, API keys, and panels that appear only when their plugin is installed. Don't follow its data path: it reads and writes the Better Auth database directly, while khatm's console goes through the control API and Better Auth (see Rules). Its repository only holds a README so far, so the [live demo](https://demo.better-auth-console.com) is the reference until the source is published.
 - **Branding preview is local.** The console renders a draft BrandingSpec with `core/spec` and the login package, without calling the worker, so previews don't load the auth server.
 
 The web UI manages two planes: the control plane (how auth is configured) and the data plane (the people who use it). Like a router's app: one screen configures the Wi-Fi, another shows connected devices. Keep them separate in code, and give each its own idhn actions.
@@ -403,7 +412,7 @@ Because the auth server is an IdP, it owns the login pages (users are redirected
 
 ### Implementation notes
 
-- Build hosted pages and the console in React, like portal's auth client and dashboard, and theme them only through CSS variables. The hosted pages start from portal's `apps/auth/client` screens.
+- Build hosted pages and the console in React with shadcn/ui and Tailwind, like idhn's web app, and theme them only through CSS variables (shadcn's theme tokens are CSS variables already). The hosted pages start from portal's `apps/auth/client` screens.
 - Emails (verification, reset, magic link) use the same tokens; the rendering library is open.
 - Optional per-OAuth-client branding overrides.
 - Live preview in the console renders a draft BrandingSpec across every page state (sign-in, sign-up, error, 2FA, email) before apply. Branding changes almost never need a process restart.
@@ -415,11 +424,11 @@ Because the auth server is an IdP, it owns the login pages (users are redirected
 | Question | Decision |
 | --- | --- |
 | Better Auth version and first registry | 1.7, at least 1.7.3. The registry ships portal's plugins: email and password, username, admin |
-| Databases at launch | Postgres only, like portal and the migrator's schema detection via `search_path` |
+| Databases at launch | Every dialect `getMigrations()` supports: Postgres, MySQL, SQLite and MSSQL. Portal's Postgres is the reference; each dialect's Deno driver is checked when its registry entry is built |
 | Control API transport | Horizon/mux (see Shared code architecture) |
 | Programmatic migrations | `getMigrations()` from `better-auth/db/migration`: dry run in `plan`, run in `apply` |
 | Contract steps (dropping orphaned tables) | Never run by khatm in v1. `plan` lists them and the bundle carries their SQL for the operator |
-| Hosted pages and console framework | React, themed through CSS variables |
+| Hosted pages and console framework | React with shadcn/ui and Tailwind, themed through CSS variables. The console's UI follows Better Auth Console (see Console deployment) |
 | Prebuilt capabilities in v1 | `email.smtp` only, for verification and password reset. Portal needs none today |
 | Default `configSource` | `file`: the manifest lives in the consumer's repo next to its delivery manifest, which is how Ensemble projects already work |
 | Admin operations under idhn | A credential-less service user in `adminUserIds`, called in-process by the worker (see Rules) |
@@ -427,7 +436,7 @@ Because the auth server is an IdP, it owns the login pages (users are redirected
 | idhn guard `authentication` blocks | khatm renders them into the bundle (`deploy/idhn/authentication.yaml`) and `doctor` checks consumer guard manifests against the session contract. Nothing is served at runtime, because guard manifests are baked into guard images |
 | Session invalidation pushed to guards | No. idhn's 5-second default `ttl_seconds` is the accepted lag |
 | CLI over HTTP | After v1, with a `session-bearer` scheme added to idhn (see Authorization), rather than routing the CLI through the console |
-| Where khatm keeps its own tables | Its own Postgres schema, `khatm`, next to Better Auth's (`auth` in portal). The worker keeps using the consumer's `search_path`, so khatm's tables are never visible to Better Auth's migrator |
+| Where khatm keeps its own tables | A `khatm` schema on Postgres and MSSQL, `khatm_`-prefixed tables on MySQL and SQLite (see State and secrets) |
 
 ### Suggested build order
 
