@@ -21,7 +21,16 @@ The end state: an operator runs `plan` and `apply` against a config, and the run
 | Interfaces | CLI and web UI, both thin shells over a shared SDK | All logic lives in shared packages |
 | Artifacts | Written automatically on every apply | An apply fails if its artifact can't be written |
 | Admin scope | The web UI is also the user admin console | New Identity Administration context, with roles and an audit log |
-| Language | TypeScript throughout, domain modeling first | Zod schemas are the source of truth |
+| Language | TypeScript on Deno, domain modeling first | Domain schemas are the source of truth; the validation library is open |
+| Workspace | An Ensemble project, like portal and idhn | Layout, build, pack and deploy follow Ensemble (see Workspace layout) |
+
+### Non-goals
+
+- **Authorization.** khatm says who the caller is; what they may do is idhn's job (guards, judge, policies). khatm only publishes the claims idhn reads.
+- **Multi-tenancy.** One deployment serves one product (portal), with one manifest and one branding spec.
+- **Active-active high availability.** One orchestrator serves at a time. A second container is safe (see Concurrency) but passive: it waits on the apply lock and proxies nothing until it holds the lease.
+- **Running user code.** Hooks and callbacks are named capabilities from a registry, never code in the manifest.
+- **Importing users from other identity providers** in v1.
 
 ## Domain model
 
@@ -109,7 +118,30 @@ type Deployment = {
 
 **Secrets are invisible to the digest.** A manifest holds `SecretRef`s, never values, so changing the value behind `{ env: "AUTH_SECRET" }` doesn't change the digest and `plan()` over manifests can't see it. The deployment therefore records a **secret fingerprint** per ref at apply time (an HMAC of the resolved value under a per-install key, never the value itself). `plan` compares current fingerprints against the active revision's and reports "value changed behind ref X" as its own step. Fingerprints live in the lock, not the manifest, so they never leak into the digest or into a Git-committed file.
 
-**Functions don't serialize.** `betterAuth()` takes callbacks (email senders, hooks, plugin callbacks). The config references them by name through a **capability registry** of prebuilt behaviors (`email.smtp`, `email.resend`, `webhook.post`) with parameters. A **plugin registry** maps each plugin `kind` to a factory plus a Zod schema for its options.
+**Functions don't serialize.** `betterAuth()` takes callbacks (email senders, hooks, plugin callbacks). The config references them by name through a **capability registry** of prebuilt behaviors (`email.smtp`, `email.resend`, `webhook.post`) with parameters. A **plugin registry** maps each plugin `kind` to a factory plus a schema for its options.
+
+**Authored vs. resolved manifest.** The operator writes the *authored* manifest. Before anything else, `core` expands it into the *resolved* manifest, which is what the worker is built from, what the digest covers and what `plan` diffs. Nothing reaches `betterAuth()` that isn't in the resolved form. Expansion rules live in the registries and are pure functions of the authored manifest plus the registry version in the lock:
+
+| Derived entry | Comes from |
+| --- | --- |
+| `trustedOrigins`, CORS origins, login `return_to` allowlist | `applications` |
+| `advanced.crossSubDomainCookies` | `session.cookieDomain` |
+| `admin` plugin | the console being enabled, or any app role in use |
+| `oauthProvider` + `jwt` plugins | any `oauth` application |
+| `deviceAuthorization` plugin | the CLI logging in over HTTP (see Control API access) |
+
+Every derived entry carries its rule (`derivedFrom: "applications"`), so `plan` can say why a line changed even when the operator never wrote it. An operator can't author a derived entry directly; to change it, they change what it derives from.
+
+**Invariants and events.** What each aggregate guarantees, and what it announces:
+
+| Aggregate | Invariants | Events |
+| --- | --- | --- |
+| `Revision` | Append-only; `parent` equals the active revision at plan time; its manifest validates and every ref resolves | `RevisionPlanned`, `RevisionApplied`, `RevisionRejected` |
+| `Deployment` | At most one active revision and one live worker, plus at most one candidate during rollout; active only changes through apply | `WorkerStarted`, `WorkerHealthy`, `TrafficSwitched`, `WorkerCrashed`, `ApplyFailed` |
+| `Application` | Unique id and origin; first-party origins share `cookieDomain` when one is set; no wildcard origins | via `RevisionApplied` |
+| `SessionContract` | Claims only name fields some plugin provides; changes are `destructive` for consumers | `SessionContractChanged` |
+| Audit | Append-only; every control-plane and data-plane write produces exactly one entry | — |
+
 
 ## Applications and consumers
 
@@ -147,13 +179,34 @@ The container runs the orchestrator as PID 1: supervisor, reverse proxy and cont
 
 ### Apply flow
 
-1. Validate the desired manifest against the Zod schemas; check every `SecretRef` resolves and fingerprint it.
+1. Resolve the authored manifest, validate it against the domain schemas, check every `SecretRef` resolves and fingerprint it.
 2. Compute the plan: config diff, secret fingerprint diff, and Better Auth's migration dry run (see Migrations). Classify each step's impact. Destructive steps need explicit confirmation; manual steps block the apply.
-3. Write the artifact bundle (see Artifacts). Failure here fails the apply.
-4. Run Better Auth's additive migrations while the old worker is still serving (safe by construction, see Migrations).
-5. Spawn the new worker on a fresh internal port and health-check it.
-6. Switch the proxy upstream, then drain and stop the old worker.
-7. Record the revision as active. On failure at any step, the old worker keeps serving.
+3. Take the apply lock and check the plan is still current (see Concurrency). Otherwise stop and ask for a re-plan.
+4. Write the artifact bundle (see Artifacts). Failure here fails the apply.
+5. Run Better Auth's additive migrations while the old worker is still serving (safe by construction, see Migrations).
+6. Spawn the new worker on a fresh internal port and wait until it is healthy (see Health).
+7. Switch the proxy upstream, then drain and stop the old worker.
+8. Record the revision as active, write the audit entry and release the lock. On failure at any step, the old worker keeps serving and the lock is released.
+
+### Concurrency
+
+Two operators, a console edit racing a CLI apply, or a file-mode boot racing a console apply can all try to change the active revision. Two rules settle it, like a compare-and-swap:
+
+- **A plan is bound to its base.** A plan records the active revision it was computed against (`base`), the desired manifest digest and the secret fingerprints it saw. `apply` takes a plan, not a manifest, and is refused when the active revision is no longer `base` or a fingerprint changed since. The operator re-plans and sees the other change in the diff instead of silently overwriting it.
+- **One apply at a time.** Applies serialize on a lock held in the database (a lease row with holder and expiry, renewed while the apply runs), so it also holds across two containers. A lease that expires mid-apply means the holder died: the next holder finds the candidate worker gone, the active revision unchanged, and starts clean.
+
+Rollback and import go through the same path: they produce a plan against the current base.
+
+### Health
+
+A worker is healthy when all of these pass, in order, within a timeout:
+
+1. The process is up and listening on its internal port.
+2. `GET /api/auth/ok` answers 200.
+3. A `get-session` call with no cookie answers `null`, which proves the database and schema are reachable. A missing table fails here, not on the first real sign-in.
+4. Every declared first-party origin passes the CORS preflight the proxy will see.
+
+The same checks, run against the live worker, back `status` and the container's own health endpoint.
 
 ### Change impact
 
@@ -212,24 +265,45 @@ A `doctor` command checks database reachability, secret resolution, base URL con
 
 ## Shared code architecture
 
-The CLI and web UI are two remotes for the same TV: the protocol is the product, and neither shell contains auth logic. In a TypeScript monorepo:
+The CLI and web UI are two remotes for the same TV: the protocol is the product, and neither shell contains auth logic.
 
-| Package | Contents | Used by |
+### Workspace layout
+
+khatm is an Ensemble project, so the split follows Ensemble's rule: `core` speaks khatm's domain, `libs` is generic enough for any project, and each app is a separately buildable unit.
+
+| Path | Contents | Used by |
 | --- | --- | --- |
-| `@orch/core` | Zod schemas (AuthSpec, BrandingSpec, plugin options), `plan(current, desired)`, validation, canonical serialization. Pure, no I/O. | Orchestrator, CLI, UI |
-| `@orch/contract` | Typed control API procedures with input/output schemas | Orchestrator (server), client |
-| `@orch/client` | SDK: connection (HTTP or Unix socket), admin auth, multi-step workflows | CLI, UI |
-| `@orch/cli` | Commands, prompts, table output | Operators, scripts |
-| `@orch/web` | Forms, diffs, live preview, user admin | Operators, support staff |
+| `source/core/spec` | Domain types and schemas (Manifest, Revision, AuthSpec, Application, SessionContract, BrandingSpec), `resolve()`, canonical serialization, `plan(current, desired)`. Pure, no I/O. | Everything |
+| `source/core/registry` | Plugin and capability registries: option schemas, factories, derivation rules, known `manual` steps per version | orchestrator, worker, console |
+| `source/core/contract` | The control API: procedure names with input and output schemas | orchestrator (server), `core/client` |
+| `source/core/client` | SDK: connection (HTTP or Unix socket), operator auth, multi-step workflows | cli, console |
+| `source/libs/supervisor` | Child process lifecycle and a switchable reverse proxy, nothing auth-specific | orchestrator |
+| `source/apps/orchestrator` | PID 1: supervisor, proxy, control API, revision store, apply lock | — |
+| `source/apps/worker` | The Better Auth process, built from a resolved manifest it is handed at start | — |
+| `source/apps/cli` | Commands, prompts, table output | Operators, scripts |
+| `source/apps/console/{server,client}` | Forms, diffs, live preview, user admin | Operators, support staff |
+| `source/apps/login` | Hosted sign-in pages, served by the worker's origin | End users |
+| `source/ship/khatm` | One image holding orchestrator and worker | — |
+| `ci/khatm/delivery.yml` | Dev stack: Postgres plus khatm, run with `ens develop khatm` | Contributors |
+
+Consumers deploy khatm as one `compute` entry in their own delivery manifest. For portal, that entry replaces today's `auth` and `auth-web` computes and the `auth-migrate` and `grant-admin` tasks.
+
+Running Better Auth on Deno is proven by portal. khatm avoids portal's one Deno snag, the migrate CLI failing to resolve workspace imports, because it calls `getMigrations()` in-process instead of the CLI.
+
+### Control API access
+
+- **Unix socket** (`docker exec khatm khatm plan`): trusted by filesystem access, acts as the break-glass operator.
+- **HTTP** (the control port, never public): the CLI logs in as an operator through Better Auth's device authorization flow against khatm's own auth server (`khatm login` prints a code, the operator approves it in the browser), then sends that session. The console uses the same operator session.
+- Every control API call is authorized against the operator roles (see Roles).
 
 Contract namespaces: `revisions.*`, `plan`, `apply`, `rollback`, `status`, `logs.stream`, `branding.preview`, `export`, `import`, `users.*`, `sessions.*`, `orgs.*`, `audit.*`.
 
 Guidelines:
 
-- Candidate libraries: oRPC or tRPC for end-to-end types; generate OpenAPI from the same definitions for non-TS clients. Log streaming needs SSE or WebSocket support.
+- The contract's transport is open. Portal's own Horizon/mux libraries are one candidate; whatever is picked must support streaming for `logs.stream` and be describable for non-TypeScript clients.
 - Workflows such as "plan → confirm destructive steps → apply → wait until healthy" live in the SDK. Shells only supply the confirmation callback, so behavior can't drift.
 - Because `core` runs client-side, the CLI and UI validate and preview plans before any round trip.
-- The web UI generates config forms from the plugin Zod schemas, so a new registry entry yields validation and a form at once.
+- The web UI generates config forms from the plugin option schemas, so a new registry entry yields validation and a form at once.
 - Layering test: an `if` about auth config inside a shell belongs in `core`.
 
 ## Reproducibility artifacts
@@ -248,7 +322,7 @@ Every apply writes a bundle so that, given the bundle and the same database, any
 | `branding/` | Tokens, message bundles, custom CSS, assets, content-hashed |
 | `plan.md` | Human-readable diff from the parent revision with impact levels |
 | `auth.ts` | Eject file: equivalent plain Better Auth code, capabilities turned into stubs |
-| `deploy/` | docker-compose and Kubernetes templates pinned to the image digest |
+| `deploy/` | A delivery manifest `compute` entry for Ensemble, pinned to the image digest |
 
 The eject file removes lock-in: anyone can leave the orchestrator and embed Better Auth directly, its native model. It also lets operators read exactly what gets built.
 
@@ -290,12 +364,12 @@ List and search users; view sessions and linked accounts; ban and unban; revoke 
 
 ### Console authentication
 
-- Admins log into the console through the auth server itself: Better Auth users with an admin role, getting branded login, 2FA and passkeys for free.
+- Operators log into the console through the auth server itself, getting branded login, 2FA and passkeys for free. They are Better Auth users in the same user table as the product's end users, so operator roles use their own namespace (`khatm:operator`, `khatm:support`) and never overlap an app role like portal's `admin`: being a portal admin grants nothing in the console, and the reverse.
 - A break-glass token (from first boot) remains for when a bad config breaks login. It is limited to control-plane recovery, not daily user management, and every use is logged loudly.
 
 ### Audit log
 
-An append-only audit log in the database records admin actions: who did what to whom, and when. It's separate from artifacts. Impersonation is time-limited, audited, and ideally visible to the impersonated session.
+An append-only audit log in the database records both planes: control-plane actions (plan, apply, rollback, import, export, break-glass use, lock takeover) and data-plane actions (ban, revoke, set role, impersonate). Each entry says who did what to whom, and when, and links the revision when there is one. It's separate from artifacts. Impersonation is time-limited, audited, and ideally visible to the impersonated session.
 
 ## Branding and hosted UI
 
@@ -316,8 +390,7 @@ Because the auth server is an IdP, it owns the login pages (users are redirected
 ### Implementation notes
 
 - Build hosted pages as a small framework-agnostic bundle (web components or light SSR) so theming is only CSS variables.
-- Check the community Better Auth UI component library (believed shadcn-based) for page structure ideas.
-- Emails (verification, reset, magic link) use the same tokens, rendered with React Email or MJML.
+- Emails (verification, reset, magic link) use the same tokens; the rendering library is open.
 - Optional per-OAuth-client branding overrides.
 - Live preview in the console renders a draft BrandingSpec across every page state (sign-in, sign-up, error, 2FA, email) before apply. Branding changes almost never need a process restart.
 
@@ -327,7 +400,7 @@ Because the auth server is an IdP, it owns the login pages (users are redirected
 
 - [ ] Which Better Auth version to pin, and which plugins ship in the first registry?
 - [ ] Which databases to support at launch (Postgres only, or also MySQL and SQLite)?
-- [ ] oRPC or tRPC for the contract?
+- [ ] Which transport for the control API contract (portal's Horizon/mux, or another)?
 - [x] How to run migrations programmatically? `getMigrations()` from `better-auth/db/migration`, dry run in `plan`, run in `apply` (see Migrations).
 - [ ] Should the orchestrator ever run contract steps (drop orphaned plugin tables) itself, or always leave them to the operator?
 - [ ] Hosted pages: web components or SSR, and which framework for the web console?
@@ -341,9 +414,9 @@ Because the auth server is an IdP, it owns the login pages (users are redirected
 
 Working backwards from a demo where `apply` swaps a running instance:
 
-1. `@orch/core`: AuthSpec schema for portal's plugin set (email and password, username, admin) plus `Application` and `SessionContract`, canonical serialization, `plan()` with impact classification.
-2. Orchestrator: supervisor, child worker built from a revision, reverse proxy, blue/green swap, revision storage.
-3. `@orch/contract` + `@orch/client` + minimal CLI: `plan`, `apply`, `status`, `logs`, `rollback`.
+1. `core/spec` and `core/registry`: AuthSpec schema for portal's plugin set (email and password, username, admin) plus `Application` and `SessionContract`, canonical serialization, `plan()` with impact classification.
+2. Orchestrator: supervisor, child worker built from a resolved manifest, reverse proxy, health checks, blue/green swap, revision storage, apply lock.
+3. `core/contract` + `core/client` + minimal CLI (Unix socket first): `plan`, `apply`, `status`, `logs`, `rollback`.
 4. Artifact bundle on apply, then `export`/`import` and the `auth.ts` eject file.
 5. Hosted login pages with design tokens and copy overrides.
 6. Web console: config forms from schemas, branding preview.
