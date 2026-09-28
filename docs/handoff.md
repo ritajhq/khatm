@@ -6,7 +6,7 @@ Sep 28, 2026 · @Ali
 
 We are building a self-hosted, single-tenant auth appliance: an orchestrator that takes a declarative config, builds the `betterAuth()` instance from it, and runs, restarts and manages the auth server process. A CLI and a web console share the same logic to configure it and administer users.
 
-This inverts Better Auth's usual model. Better Auth normally lives inside the app, configured in code. Here it becomes a standalone identity provider (IdP), like a TypeScript-powered Keycloak. Client apps sit on other origins and integrate as OAuth/OIDC clients, so the auth server leans on plugins such as OIDC provider, JWT and bearer. This decision shapes everything else, especially the hosted login UI.
+This inverts Better Auth's usual model. Better Auth normally lives inside the app, configured in code. Here it becomes a standalone identity provider (IdP), like a TypeScript-powered Keycloak. Client apps sit on other origins. The first real consumer, the portal, integrates as a set of first-party apps sharing one session cookie, with idhn guards in front of its services (see Applications and consumers). Third-party apps integrating as OAuth/OIDC clients come later, through Better Auth's oauth-provider and JWT plugins. This decision shapes everything else, especially the hosted login UI.
 
 Mental model: a small Kubernetes. The config is a manifest (desired state), the orchestrator is a controller running a reconcile loop, the auth process is a pod, and the CLI is kubectl.
 
@@ -29,7 +29,7 @@ Five bounded contexts, each with its own lifecycle:
 
 | Context | Owns | Notes |
 | --- | --- | --- |
-| Configuration | `Manifest`, `Revision`, `AuthSpec` | Desired state; manifests content-addressed, revisions append-only |
+| Configuration | `Manifest`, `Revision`, `AuthSpec`, `Application`, `SessionContract` | Desired state; manifests content-addressed, revisions append-only |
 | Runtime | `AuthInstance`, `Deployment` | Actual state: `Starting → Healthy → Draining → Stopped \| Crashed` |
 | Control | Plan, apply, rollback, status, logs, export, import | Exposed through the control API |
 | Presentation | `BrandingSpec`, hosted pages, email templates | Separate lifecycle; changes applied hot |
@@ -63,6 +63,33 @@ type AuthSpec = {
   socialProviders: Record<ProviderId, { clientId: SecretRef; clientSecret: SecretRef }>;
   plugins: PluginSpec[];     // discriminated union by `kind`
   hooks: CapabilityRef[];    // named references, not code
+  applications: Application[];
+  session: SessionContract;
+};
+
+// Who signs in through this server. First-party apps share the session cookie;
+// OAuth apps (later) get tokens through the oauth-provider plugin.
+type Application =
+  | {
+      kind: "first-party";
+      id: AppId;                 // "dashboard", "admin"
+      origin: string;            // "https://dashboard.ritaj.app"
+      landing?: boolean;         // where sign-in goes when no return_to is given
+    }
+  | {
+      kind: "oauth";
+      id: AppId;
+      redirectUris: string[];
+      scopes: string[];
+      confidential: boolean;     // client secret delivered once, stored hashed by Better Auth
+    };
+
+// What resource servers (idhn guards, backends) rely on to identify a caller.
+type SessionContract = {
+  cookieDomain?: string;       // shared parent domain; required once any guard sits on another host
+  introspectionURL: string;    // internal get-session address guards call, never the public one
+  issuer: string;              // "portal"
+  claims: string[];            // user fields exposed: ["username", "email", "name", "emailVerified", "role"]
 };
 
 type SecretRef = { env: string } | { file: string };
@@ -83,6 +110,36 @@ type Deployment = {
 **Secrets are invisible to the digest.** A manifest holds `SecretRef`s, never values, so changing the value behind `{ env: "AUTH_SECRET" }` doesn't change the digest and `plan()` over manifests can't see it. The deployment therefore records a **secret fingerprint** per ref at apply time (an HMAC of the resolved value under a per-install key, never the value itself). `plan` compares current fingerprints against the active revision's and reports "value changed behind ref X" as its own step. Fingerprints live in the lock, not the manifest, so they never leak into the digest or into a Git-committed file.
 
 **Functions don't serialize.** `betterAuth()` takes callbacks (email senders, hooks, plugin callbacks). The config references them by name through a **capability registry** of prebuilt behaviors (`email.smtp`, `email.resend`, `webhook.post`) with parameters. A **plugin registry** maps each plugin `kind` to a factory plus a Zod schema for its options.
+
+## Applications and consumers
+
+The portal (`ritajhq/portal`, branch `feat/authorization`) is the reference case: khatm replaces its hand-wired Better Auth service. Everything below is what portal does by hand today and what khatm must own instead.
+
+### What portal wires by hand
+
+| Concern | Portal today | Scattered across |
+| --- | --- | --- |
+| App origins | dashboard and admin origins as env vars | Better Auth `trustedOrigins`, the Hono CORS list, and the login page's `return_to` allowlist (injected at container boot) |
+| Cookie strategy | `crossSubDomainCookies` on a shared parent domain (`lvh.me` in dev, the real domain in prod); host-only `SameSite=None` as a fallback | `core/auth/server`, env |
+| Sign-in round trip | Apps send users to `auth/login?return_to=<url>`; the login page follows it only to a known app origin, else the dashboard | `core/auth/client/sign-in.ts`, `apps/auth/client/auth.ts` |
+| Plugins | `emailAndPassword`, `username`, `admin` (for the `role` column only) | `core/auth/server` |
+| Caller identity for services | idhn guards call `get-session` server to server with the session cookie, then forward `x-idhn-subject`, `x-idhn-issuer`, `x-idhn-claims` | one guard manifest per service, each repeating `session_url`, cookie name, issuer and claims |
+| First admin | `grant-admin` task: SQL `update auth."user" set role = 'admin'` | `ci/portal/scripts/grant-admin.sh` |
+| Migrations | `auth-migrate` task running the Better Auth CLI, then a manual restart | `ci/portal/scripts/auth-migrate.sh` |
+| User lookup for other services | Internal RPC (`users.search`, `users.getByIds`) querying `auth."user"` directly | `apps/auth/server/users.ts` |
+
+### What khatm owns instead
+
+- **Applications derive the security config.** Each first-party `Application` is declared once. khatm derives `trustedOrigins`, CORS, the hosted login page's `return_to` allowlist and its default landing app from that list. An origin can't be trusted in one place and forgotten in another, and the open-redirect check stops being app code.
+- **The cookie strategy is validated, not chosen per env.** When apps share a parent domain, khatm sets `crossSubDomainCookies`. The host-only `SameSite=None` fallback works for browsers but a guard on another host never receives the cookie, so `plan` rejects it once any consumer is declared.
+- **The session contract is a published interface.** Guards depend on the cookie name, the introspection URL, the issuer and the claim names. khatm treats them as a contract: it can render the `authentication` block for idhn guard manifests (or serve it for guards to fetch), and `plan` flags any change that breaks it as `destructive` for consumers. Examples: switching `baseURL` between http and https renames the cookie (Better Auth adds the `__Secure-` prefix), removing the `username` plugin drops a claim, and changing `cookieDomain` logs everyone out.
+- **End-user roles are separate from operator roles.** Portal's `role` claim (`user`, `admin`) is an app-level role that idhn policies read. It is not the console's Operator/Support roles. khatm manages both, but in different planes: app roles through the admin plugin in Identity Administration, operator roles in the control plane.
+- **Bootstrap and lookup become product features.** `grant-admin` becomes `users set-role <email> admin` (CLI and console), and the first app admin can be named in the manifest's first-boot block. Portal's internal users RPC becomes a read-only user directory on the control API (search, get by ids), so no service queries Better Auth's tables directly.
+- **Role changes lag by the guard cache.** Guards cache each session for `ttl_seconds`. khatm documents that lag and, when it has a consumer registry, can tell guards to drop a subject's cached session on role change or revocation.
+
+### Not needed for portal v1
+
+OAuth/OIDC apps, JWT/JWKS verification and back-channel logout. Portal's services never verify tokens themselves; the guard in front of them does, through `get-session`. These stay on the roadmap for third-party apps, and Better Auth keeps OAuth clients as `oauthClient` rows, so khatm will sync declared OAuth apps into that table rather than pass them as config.
 
 ## Orchestrator runtime
 
@@ -277,12 +334,14 @@ Because the auth server is an IdP, it owns the login pages (users are redirected
 - [ ] Which prebuilt capabilities (email providers, webhooks) are in v1?
 - [ ] Default `configSource` for new deployments?
 - [ ] Can impersonation be shown to the impersonated session with Better Auth's admin plugin as-is?
+- [ ] Does khatm render idhn guard `authentication` blocks, serve them for guards to fetch, or only validate that guards match the session contract?
+- [ ] Should khatm push session invalidations to guards (role change, ban, revoke), or is the `ttl_seconds` lag acceptable?
 
 ### Suggested build order
 
 Working backwards from a demo where `apply` swaps a running instance:
 
-1. `@orch/core`: AuthSpec schema for a small plugin set, canonical serialization, `plan()` with impact classification.
+1. `@orch/core`: AuthSpec schema for portal's plugin set (email and password, username, admin) plus `Application` and `SessionContract`, canonical serialization, `plan()` with impact classification.
 2. Orchestrator: supervisor, child worker built from a revision, reverse proxy, blue/green swap, revision storage.
 3. `@orch/contract` + `@orch/client` + minimal CLI: `plan`, `apply`, `status`, `logs`, `rollback`.
 4. Artifact bundle on apply, then `export`/`import` and the `auth.ts` eject file.
