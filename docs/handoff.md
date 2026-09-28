@@ -129,9 +129,9 @@ type Deployment = {
 | --- | --- |
 | `trustedOrigins`, CORS origins, login `return_to` allowlist | `applications` |
 | `advanced.crossSubDomainCookies` | `session.cookieDomain` |
-| `admin` plugin, with khatm's service identity in `adminUserIds` | Identity Administration being enabled, or any app role in use |
+| `admin` plugin, with khatm's service user in `adminUserIds` | Identity Administration being enabled, or any app role in use |
 | `oauthProvider` (`@better-auth/oauth-provider`) + `jwt` plugins | any `oauth` application |
-| `deviceAuthorization` plugin | the CLI logging in over HTTP (see Authorization) |
+| `bearer` + `deviceAuthorization` plugins (after v1) | the CLI logging in over HTTP (see Authorization) |
 | The console's own first-party `Application` | the console being enabled |
 
 Every derived entry carries its rule (`derivedFrom: "applications"`), so `plan` can say why a line changed even when the operator never wrote it. An operator can't author a derived entry directly; to change it, they change what it derives from.
@@ -171,7 +171,7 @@ The portal (`ritajhq/portal`, branch `feat/authorization`) is the reference case
 - **The session contract is a published interface.** Guards depend on the cookie name, the introspection URL, the issuer and the claim names. khatm treats them as a contract: it can render the `authentication` block for idhn guard manifests (or serve it for guards to fetch), and `plan` flags any change that breaks it as `destructive` for consumers. Examples: switching `baseURL` between http and https renames the cookie (Better Auth adds the `__Secure-` prefix), removing the `username` plugin drops a claim, and changing `cookieDomain` logs everyone out.
 - **Roles are user data, not khatm permissions.** Portal's `role` claim (`user`, `admin`) is a field on the user that idhn policies read. khatm stores and edits it through the admin plugin, and never checks it itself.
 - **Bootstrap and lookup become product features.** `grant-admin` becomes `users set-role <email> admin` (CLI and console), and the first admin can be named in the manifest's `bootstrap` block (see First boot). Portal's internal users RPC becomes a read-only user directory on the control API (search, get by ids), so no service queries Better Auth's tables directly.
-- **Role changes lag by the guard cache.** Guards cache each session for `ttl_seconds`. khatm documents that lag and, when it has a consumer registry, can tell guards to drop a subject's cached session on role change or revocation.
+- **Role changes lag by the guard cache.** Guards cache each session for `ttl_seconds`, 5 seconds by default in idhn. That lag is accepted, so khatm pushes nothing to guards. A consumer that wants a shorter lag lowers `ttl_seconds`.
 
 ### Not needed for portal v1
 
@@ -247,7 +247,7 @@ That shapes the whole design:
 ### State and secrets
 
 - Auth data lives in the operator's database.
-- Config revisions live in the same database under a separate prefix (`orchestrator_*`), so the container is stateless apart from the database.
+- Config revisions, plans, the apply lock and the audit log live in the same database in their own `khatm` schema, so the container is stateless apart from the database.
 - Secrets come only from env vars or mounted files. The config holds references, never values.
 - Branding assets are stored in the database as blobs, so a database backup covers everything.
 
@@ -303,14 +303,16 @@ khatm authenticates and idhn authorizes, for khatm's own surfaces exactly as for
 
 - **Console.** An idhn guard sits in front of the console. Operators sign in on the hosted login like any user, and idhn policies decide who gets in. The console forwards the caller's session to the control API.
 - **Control API over HTTP.** An idhn guard sits in front of the control port. khatm ships its guard manifest (`source/ship/guard/control`): one action per contract procedure (`khatm.plan`, `khatm.apply`, `users.ban`, ...) with the facts policies need, such as the target user id. The policies are the consumer's. The orchestrator reads the caller from `x-idhn-subject` for revisions and the audit log, and trusts nothing else about them.
-- **CLI.** `khatm login` runs Better Auth's device authorization flow against khatm's own auth server: it prints a code, the operator approves it in the browser, and the CLI gets a session token. It sends that token as the session cookie, so the same guard handles it.
+- **CLI.** In v1 the CLI talks only over the Unix socket (`docker exec`, or `kubectl exec` on Kubernetes), so whoever can exec into the container can operate khatm. A remote CLI over HTTP comes later and needs two pieces:
+  - khatm derives Better Auth's `deviceAuthorization` and `bearer` plugins. `khatm login` prints a code, the operator approves it in the browser, and `/device/token` returns a raw session token, which the CLI sends as `Authorization: Bearer`.
+  - idhn gains a `session-bearer` scheme. It works like `session-cookie`, but reads the bearer header and forwards it to `session_url`, where the bearer plugin turns it into a session. The raw token can't ride in the cookie instead, because `get-session` only accepts a signed cookie and the device flow never sets one.
 - **Unix socket** (`docker exec khatm khatm plan`): trusted by filesystem access, no guard. It is the break-glass path when a bad config breaks sign-in, and every use is audited as the `socket` subject.
 
 Contract namespaces: `revisions.*`, `plan`, `apply`, `rollback`, `status`, `logs.stream`, `branding.preview`, `export`, `import`, `users.*`, `sessions.*`, `orgs.*`, `audit.*`.
 
 Guidelines:
 
-- The contract's transport is open. Portal's own Horizon/mux libraries are one candidate; whatever is picked must support streaming for `logs.stream` and be describable for non-TypeScript clients.
+- The contract runs on portal's Horizon/mux libraries: each procedure is a packet POSTed to its own name, which is exactly what idhn guard manifests match on, so the control API's guard manifest is one action per packet with facts read from the body. mux's WebSocket client carries `logs.stream` and status subscriptions.
 - Workflows such as "plan → confirm destructive steps → apply → wait until healthy" live in the SDK. Shells only supply the confirmation callback, so behavior can't drift.
 - Because `core` runs client-side, the CLI and UI validate and preview plans before any round trip.
 - The web UI generates config forms from the plugin option schemas, so a new registry entry yields validation and a form at once.
@@ -333,7 +335,7 @@ Every apply writes a bundle so that, given the bundle and the same database, any
 | `branding/` | Tokens, message bundles, custom CSS, assets, content-hashed |
 | `plan.md` | Human-readable diff from the parent revision with impact levels |
 | `auth.ts` | Eject file: equivalent plain Better Auth code, capabilities turned into stubs |
-| `deploy/` | A delivery manifest `compute` entry for Ensemble, pinned to the image digest |
+| `deploy/` | Delivery manifest `compute` entries for Ensemble, pinned to the image digests, and the rendered idhn `authentication` block |
 
 The eject file removes lock-in: anyone can leave the orchestrator and embed Better Auth directly, its native model. It also lets operators read exactly what gets built.
 
@@ -367,17 +369,21 @@ The web UI manages two planes: the control plane (how auth is configured) and th
 
 ### Operations
 
-List and search users; view sessions and linked accounts; ban and unban; revoke sessions; reset password or force verification; set a user's app role; impersonate for support; manage orgs and memberships when that plugin is enabled.
+List and search users; view sessions and linked accounts; ban and unban; revoke sessions; reset password or force verification; set a user's app role; manage orgs and memberships when that plugin is enabled.
 
 ### Rules
 
-- **Go through Better Auth, not SQL.** Admin actions call the running worker's admin plugin endpoints so hooks, validation and plugin cleanup still run. Those endpoints check Better Auth's own admin role, so the orchestrator calls them on the worker's internal port as khatm's service identity: a user the resolved manifest lists in `adminUserIds`, holding a session the worker creates for it at start and hands only to the orchestrator. idhn has already authorized the human by then, and the audit entry names them, not the service identity.
+- **Go through Better Auth, not SQL.** Admin actions call Better Auth's admin endpoints so hooks, validation and plugin cleanup still run. Every one of them except `create-user` requires a session, and the admin plugin checks that session's user against its own roles. So:
+  - First boot creates a **khatm service user** with no credentials, so it can never sign in. The resolved manifest lists it in the admin plugin's `adminUserIds`, which passes every permission check.
+  - The worker exposes a small **internal admin surface** on its internal port, never proxied publicly. For each call it creates a short-lived session for the service user through Better Auth's internal adapter, signs it with the worker's own secret, and calls `auth.api.*` in-process with that cookie.
+  - idhn has already authorized the human before the call reaches the orchestrator. The audit entry names the human from `x-idhn-subject`, never the service user.
 - **Config-aware screens.** Panels appear based on the active config (orgs, 2FA status and reset, passkey list). The plugin registry declares which admin panels each plugin adds.
 - **CLI parity.** `users list --search`, `users ban <id>`, `sessions revoke --user <id>`, useful for scripted bulk work.
+- **No impersonation in v1.** Better Auth records the calling session's user as `impersonatedBy`, and `stop-impersonating` puts that user's session back in the browser. Through the service user, that would hand a person the service user's session. Impersonation needs its own khatm flow, tied to the human's session, and waits until after v1.
 
 ### Audit log
 
-An append-only audit log in the database records both planes: control-plane actions (plan, apply, rollback, import, export, socket use, lock takeover) and data-plane actions (ban, revoke, set role, impersonate). Each entry says who did what to whom (the idhn subject), and when, and links the revision when there is one. It's separate from artifacts. Impersonation is time-limited, audited, and ideally visible to the impersonated session.
+An append-only audit log in the database records both planes: control-plane actions (plan, apply, rollback, import, export, socket use, lock takeover) and data-plane actions (ban, revoke, set role). Each entry says who did what to whom (the idhn subject), and when, and links the revision when there is one. It's separate from artifacts.
 
 ## Branding and hosted UI
 
@@ -397,28 +403,31 @@ Because the auth server is an IdP, it owns the login pages (users are redirected
 
 ### Implementation notes
 
-- Build hosted pages as a small framework-agnostic bundle (web components or light SSR) so theming is only CSS variables.
+- Build hosted pages and the console in React, like portal's auth client and dashboard, and theme them only through CSS variables. The hosted pages start from portal's `apps/auth/client` screens.
 - Emails (verification, reset, magic link) use the same tokens; the rendering library is open.
 - Optional per-OAuth-client branding overrides.
 - Live preview in the console renders a draft BrandingSpec across every page state (sign-in, sign-up, error, 2FA, email) before apply. Branding changes almost never need a process restart.
 
-## Open questions and build order
+## Decisions and build order
 
-### Open questions for the implementation session
+### Decided questions
 
-- [x] Which Better Auth version? 1.7, at least 1.7.3. The first registry ships portal's plugins (email and password, username, admin) plus device authorization for the CLI.
-- [ ] Which databases to support at launch (Postgres only, or also MySQL and SQLite)?
-- [ ] Which transport for the control API contract (portal's Horizon/mux, or another)?
-- [x] How to run migrations programmatically? `getMigrations()` from `better-auth/db/migration`, dry run in `plan`, run in `apply` (see Migrations).
-- [ ] Should the orchestrator ever run contract steps (drop orphaned plugin tables) itself, or always leave them to the operator?
-- [ ] Hosted pages: web components or SSR, and which framework for the web console?
-- [ ] Does calling admin endpoints as a service identity in `adminUserIds` cover every Identity Administration operation, including impersonation, or do some need Better Auth's internal adapter?
-- [ ] Should idhn gain a bearer scheme for the CLI, or is sending the session token as a cookie enough?
-- [ ] Which prebuilt capabilities (email providers, webhooks) are in v1?
-- [ ] Default `configSource` for new deployments?
-- [ ] Can impersonation be shown to the impersonated session with Better Auth's admin plugin as-is?
-- [ ] Does khatm render idhn guard `authentication` blocks, serve them for guards to fetch, or only validate that guards match the session contract?
-- [ ] Should khatm push session invalidations to guards (role change, ban, revoke), or is the `ttl_seconds` lag acceptable?
+| Question | Decision |
+| --- | --- |
+| Better Auth version and first registry | 1.7, at least 1.7.3. The registry ships portal's plugins: email and password, username, admin |
+| Databases at launch | Postgres only, like portal and the migrator's schema detection via `search_path` |
+| Control API transport | Horizon/mux (see Shared code architecture) |
+| Programmatic migrations | `getMigrations()` from `better-auth/db/migration`: dry run in `plan`, run in `apply` |
+| Contract steps (dropping orphaned tables) | Never run by khatm in v1. `plan` lists them and the bundle carries their SQL for the operator |
+| Hosted pages and console framework | React, themed through CSS variables |
+| Prebuilt capabilities in v1 | `email.smtp` only, for verification and password reset. Portal needs none today |
+| Default `configSource` | `file`: the manifest lives in the consumer's repo next to its delivery manifest, which is how Ensemble projects already work |
+| Admin operations under idhn | A credential-less service user in `adminUserIds`, called in-process by the worker (see Rules) |
+| Impersonation | Not in v1 (see Rules) |
+| idhn guard `authentication` blocks | khatm renders them into the bundle (`deploy/idhn/authentication.yaml`) and `doctor` checks consumer guard manifests against the session contract. Nothing is served at runtime, because guard manifests are baked into guard images |
+| Session invalidation pushed to guards | No. idhn's 5-second default `ttl_seconds` is the accepted lag |
+| CLI over HTTP | After v1, with a `session-bearer` scheme added to idhn (see Authorization), rather than routing the CLI through the console |
+| Where khatm keeps its own tables | Its own Postgres schema, `khatm`, next to Better Auth's (`auth` in portal). The worker keeps using the consumer's `search_path`, so khatm's tables are never visible to Better Auth's migrator |
 
 ### Suggested build order
 
