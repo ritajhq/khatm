@@ -23,7 +23,7 @@ The end state: an operator runs `plan` and `apply` against a config, and the run
 | Artifacts | Written automatically on every apply | An apply fails if its artifact can't be written |
 | Admin scope | The web UI is also the user admin console | New Identity Administration context with an audit log |
 | Authorization | idhn, for khatm itself as for any service | khatm has no roles or permissions of its own; idhn guards sit in front of the console and the control API |
-| Language | TypeScript on Deno, domain modeling first | Domain schemas are the source of truth; the validation library is open |
+| Language | TypeScript on Deno, domain modeling first | Domain schemas are the source of truth, written in Zod 4: Better Auth already depends on it, and `z.toJSONSchema()` drives the console's generated forms |
 | Workspace | An Ensemble project, like portal and idhn | Layout, build, pack and deploy follow Ensemble (see Workspace layout) |
 
 ### Non-goals
@@ -313,7 +313,18 @@ khatm authenticates and idhn authorizes, for khatm's own surfaces exactly as for
 - **Control API over HTTP.** An idhn guard sits in front of the control port. khatm ships its guard manifest (`source/ship/guard/control`): one action per contract procedure (`khatm.plan`, `khatm.apply`, `users.ban`, ...) with the facts policies need, such as the target user id. The policies are the consumer's. The orchestrator reads the caller from `x-idhn-subject` for revisions and the audit log, and trusts nothing else about them.
 - **CLI.** In v1 the CLI talks only over the Unix socket (`docker exec`, or `kubectl exec` on Kubernetes), so whoever can exec into the container can operate khatm. A remote CLI over HTTP comes later and needs two pieces:
   - khatm derives Better Auth's `deviceAuthorization` and `bearer` plugins. `khatm login` prints a code, the operator approves it in the browser, and `/device/token` returns a raw session token, which the CLI sends as `Authorization: Bearer`.
-  - idhn gains a `session-bearer` scheme. It works like `session-cookie`, but reads the bearer header and forwards it to `session_url`, where the bearer plugin turns it into a session. The control API's guard must accept both the console's cookie and the CLI's bearer header. This idhn change is being built in parallel on idhn's `feat/session-bearer` branch. The raw token can't ride in the cookie instead, because `get-session` only accepts a signed cookie and the device flow never sets one.
+  - idhn's `session-bearer` scheme (built on idhn's `feat/session-bearer`) reads the bearer header and forwards only it to `session_url`, where the bearer plugin turns it into a session. The raw token can't ride in the cookie instead, because `get-session` only accepts a signed cookie and the device flow never sets one.
+  - The control API's guard lists both schemes, so the console's cookie and the CLI's bearer header reach the same guard. The first scheme whose credential a request carries decides, and an invalid credential never falls through to the next:
+
+    ```yaml
+    authentication:
+      - scheme: session-cookie
+        session_url: http://khatm:4100/api/auth/get-session
+        issuer: portal
+      - scheme: session-bearer
+        session_url: http://khatm:4100/api/auth/get-session
+        issuer: portal
+    ```
 - **Unix socket** (`docker exec khatm khatm plan`): trusted by filesystem access, no guard. It is the break-glass path when a bad config breaks sign-in, and every use is audited as the `socket` subject.
 
 Contract namespaces: `revisions.*`, `plan`, `apply`, `rollback`, `status`, `logs.stream`, `branding.preview`, `export`, `import`, `users.*`, `sessions.*`, `orgs.*`, `audit.*`.
@@ -435,7 +446,7 @@ Because the auth server is an IdP, it owns the login pages (users are redirected
 | Impersonation | Not in v1 (see Rules) |
 | idhn guard `authentication` blocks | khatm renders them into the bundle (`deploy/idhn/authentication.yaml`) and `doctor` checks consumer guard manifests against the session contract. Nothing is served at runtime, because guard manifests are baked into guard images |
 | Session invalidation pushed to guards | No. idhn's 5-second default `ttl_seconds` is the accepted lag |
-| CLI over HTTP | After v1, with a `session-bearer` scheme added to idhn (see Authorization), rather than routing the CLI through the console |
+| CLI over HTTP | After v1. idhn's side is ready on `feat/session-bearer`; khatm's side is deriving `bearer` and `deviceAuthorization` plus `khatm login` (see Authorization) |
 | Where khatm keeps its own tables | A `khatm` schema on Postgres and MSSQL, `khatm_`-prefixed tables on MySQL and SQLite (see State and secrets) |
 
 ### Suggested build order
