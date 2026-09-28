@@ -1,0 +1,5 @@
+# Configure each app's build kit here, e.g.:
+#
+# build:
+#   my-app:
+#     kit: deno.bundle

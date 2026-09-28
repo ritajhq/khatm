@@ -1,0 +1,4 @@
+publish:
+  # Option values come from each release's publish: block. The repo is
+  # inferred from the git remote unless the release sets a repo option.
+  github: "Upload the compiled binary to a GitHub release. Options: repo (optional)."
