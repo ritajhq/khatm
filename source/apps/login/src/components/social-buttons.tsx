@@ -1,4 +1,4 @@
-import { Button } from './ui/button.tsx'
+import { Button } from '@khatm-libs/ui'
 
 const NAMES: Record<string, string> = {
   github: 'GitHub',

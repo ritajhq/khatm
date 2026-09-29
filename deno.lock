@@ -1,8 +1,36 @@
 {
   "version": "5",
   "specifiers": {
+    "jsr:@david/dax@0.42.0": "0.42.0",
+    "jsr:@david/path@0.2": "0.2.0",
+    "jsr:@david/which@0.4.2": "0.4.2",
+    "jsr:@david/which@~0.4.1": "0.4.2",
+    "jsr:@ensemble/core@0.27": "0.27.0",
+    "jsr:@ensemble/host@0.27": "0.27.0",
+    "jsr:@ensemble/kit-sdk@*": "0.27.0",
+    "jsr:@std/assert@0.221": "0.221.0",
     "jsr:@std/assert@1.0.14": "1.0.14",
+    "jsr:@std/assert@^1.0.15": "1.0.19",
+    "jsr:@std/assert@^1.0.19": "1.0.19",
+    "jsr:@std/bytes@0.221": "0.221.0",
+    "jsr:@std/cli@1.0.32": "1.0.32",
+    "jsr:@std/dotenv@0.225.5": "0.225.5",
+    "jsr:@std/fmt@1": "1.0.10",
+    "jsr:@std/fmt@1.0.10": "1.0.10",
+    "jsr:@std/fs@1": "1.0.24",
+    "jsr:@std/fs@1.0.24": "1.0.24",
+    "jsr:@std/fs@^1.0.19": "1.0.24",
     "jsr:@std/internal@^1.0.10": "1.0.14",
+    "jsr:@std/internal@^1.0.12": "1.0.14",
+    "jsr:@std/internal@^1.0.14": "1.0.14",
+    "jsr:@std/io@0.221": "0.221.0",
+    "jsr:@std/path@1": "1.1.6",
+    "jsr:@std/path@1.1.6": "1.1.6",
+    "jsr:@std/path@^1.1.2": "1.1.6",
+    "jsr:@std/path@^1.1.5": "1.1.6",
+    "jsr:@std/streams@0.221": "0.221.0",
+    "jsr:@std/testing@1.0.16": "1.0.16",
+    "jsr:@std/yaml@1.1.2": "1.1.2",
     "npm:@tailwindcss/cli@4.1.13": "4.1.13",
     "npm:@types/pg@^8.11.10": "8.23.1",
     "npm:@types/react-dom@19.2.3": "19.2.3_@types+react@19.2.17",
@@ -20,14 +48,123 @@
     "npm:zod@^4.1.0": "4.6.5"
   },
   "jsr": {
+    "@david/dax@0.42.0": {
+      "integrity": "0c547c9a20577a6072b90def194c159c9ddab82280285ebfd8268a4ebefbd80b",
+      "dependencies": [
+        "jsr:@david/path",
+        "jsr:@david/which@~0.4.1",
+        "jsr:@std/fmt@1",
+        "jsr:@std/fs@1",
+        "jsr:@std/io",
+        "jsr:@std/path@1",
+        "jsr:@std/streams"
+      ]
+    },
+    "@david/path@0.2.0": {
+      "integrity": "f2d7aa7f02ce5a55e27c09f9f1381794acb09d328f8d3c8a2e3ab3ffc294dccd",
+      "dependencies": [
+        "jsr:@std/fs@1",
+        "jsr:@std/path@1"
+      ]
+    },
+    "@david/which@0.4.2": {
+      "integrity": "440ee262bc0673b57a39ad4d0dc5673e515ddd41c049a55b2588a0881e5d4a8c"
+    },
+    "@ensemble/core@0.27.0": {
+      "integrity": "1d1699d943ad58d5fe90c822364052c1c5f1acde3fd98c0f7dedd45831282a31",
+      "dependencies": [
+        "jsr:@std/cli",
+        "jsr:@std/dotenv",
+        "jsr:@std/fs@1.0.24",
+        "jsr:@std/path@1.1.6",
+        "jsr:@std/yaml"
+      ]
+    },
+    "@ensemble/host@0.27.0": {
+      "integrity": "f5e194411ebbdc35b536cd0e209d70a9b1ccd78d7a86f8c79a77bfc178b9be44",
+      "dependencies": [
+        "jsr:@david/dax",
+        "jsr:@david/which@0.4.2",
+        "jsr:@ensemble/core",
+        "jsr:@std/fmt@1.0.10",
+        "jsr:@std/fs@1.0.24",
+        "jsr:@std/path@1.1.6"
+      ]
+    },
+    "@ensemble/kit-sdk@0.27.0": {
+      "integrity": "bd587e90def735fc77958cf3782e04f067cb83929393357758b2fc609e963ddb",
+      "dependencies": [
+        "jsr:@ensemble/core",
+        "jsr:@ensemble/host"
+      ]
+    },
+    "@std/assert@0.221.0": {
+      "integrity": "a5f1aa6e7909dbea271754fd4ab3f4e687aeff4873b4cef9a320af813adb489a"
+    },
     "@std/assert@1.0.14": {
       "integrity": "68d0d4a43b365abc927f45a9b85c639ea18a9fab96ad92281e493e4ed84abaa4",
       "dependencies": [
-        "jsr:@std/internal"
+        "jsr:@std/internal@^1.0.10"
+      ]
+    },
+    "@std/assert@1.0.19": {
+      "integrity": "eaada96ee120cb980bc47e040f82814d786fe8162ecc53c91d8df60b8755991e",
+      "dependencies": [
+        "jsr:@std/internal@^1.0.12"
+      ]
+    },
+    "@std/bytes@0.221.0": {
+      "integrity": "64a047011cf833890a4a2ab7293ac55a1b4f5a050624ebc6a0159c357de91966"
+    },
+    "@std/cli@1.0.32": {
+      "integrity": "188b3a100d6202d64e3f5bd3d799c7fa4f6d77f92cc65eb7f641c1fa0aa92a66"
+    },
+    "@std/dotenv@0.225.5": {
+      "integrity": "9ce6f9d0ec3311f74a32535aa1b8c62ed88b1ab91b7f0815797d77a6f60c922f"
+    },
+    "@std/fmt@1.0.10": {
+      "integrity": "90dfba288802ac6de82fb31d0917eb9e4450b9925b954d5e51fc29ac07419db5"
+    },
+    "@std/fs@1.0.24": {
+      "integrity": "f3061b45b81673a2bece689da041df32d174be064c89eb6397fb5718d3fb7877",
+      "dependencies": [
+        "jsr:@std/internal@^1.0.14",
+        "jsr:@std/path@^1.1.5"
       ]
     },
     "@std/internal@1.0.14": {
       "integrity": "291516b3d4c35024d6ffbc0a9df5bf4c64116e05b50012cf846710152d2ffdf7"
+    },
+    "@std/io@0.221.0": {
+      "integrity": "faf7f8700d46ab527fa05cc6167f4b97701a06c413024431c6b4d207caa010da",
+      "dependencies": [
+        "jsr:@std/assert@0.221",
+        "jsr:@std/bytes"
+      ]
+    },
+    "@std/path@1.1.6": {
+      "integrity": "c68485c2a4dfbb5ae3cc74fae4e8c4e5d874cf8a8ed12927917235c758b46cbe",
+      "dependencies": [
+        "jsr:@std/internal@^1.0.14"
+      ]
+    },
+    "@std/streams@0.221.0": {
+      "integrity": "47f2f74634b47449277c0ee79fe878da4424b66bd8975c032e3afdca88986e61",
+      "dependencies": [
+        "jsr:@std/io"
+      ]
+    },
+    "@std/testing@1.0.16": {
+      "integrity": "a917ffdeb5924c9be436dc78bc32e511760e14d3a96e49c607fc5ecca86d0092",
+      "dependencies": [
+        "jsr:@std/assert@^1.0.15",
+        "jsr:@std/fs@^1.0.19",
+        "jsr:@std/internal@^1.0.12",
+        "jsr:@std/path@^1.1.2"
+      ]
+    },
+    "@std/yaml@1.1.2": {
+      "integrity": "de612653c036749ba2044165e316f52412b0f0698afffb7ee80b5331d6d2abae"
     }
   },
   "npm": {
@@ -911,6 +1048,20 @@
           "jsr:@std/assert@1.0.14"
         ]
       },
+      "source/apps/console": {
+        "dependencies": [
+          "jsr:@std/assert@1.0.14",
+          "npm:@tailwindcss/cli@4.1.13",
+          "npm:@types/react-dom@19.2.3",
+          "npm:@types/react@19.2.17",
+          "npm:esbuild@0.25.10",
+          "npm:playwright-core@1.55.0",
+          "npm:react-dom@19.2.0",
+          "npm:react@19.2.0",
+          "npm:tailwindcss@4.1.13",
+          "npm:zod@^4.1.0"
+        ]
+      },
       "source/apps/login": {
         "dependencies": [
           "jsr:@std/assert@1.0.14",
@@ -918,12 +1069,9 @@
           "npm:@types/react-dom@19.2.3",
           "npm:@types/react@19.2.17",
           "npm:better-auth@^1.7.3",
-          "npm:class-variance-authority@0.7.1",
-          "npm:clsx@2.1.1",
           "npm:esbuild@0.25.10",
           "npm:react-dom@19.2.0",
           "npm:react@19.2.0",
-          "npm:tailwind-merge@3.3.1",
           "npm:tailwindcss@4.1.13"
         ]
       },
@@ -969,6 +1117,7 @@
       "source/core/contract": {
         "dependencies": [
           "jsr:@std/assert@1.0.14",
+          "jsr:@std/yaml@1.1.2",
           "npm:zod@^4.1.0"
         ]
       },
@@ -998,6 +1147,16 @@
       "source/libs/supervisor": {
         "dependencies": [
           "jsr:@std/assert@1.0.14"
+        ]
+      },
+      "source/libs/ui": {
+        "dependencies": [
+          "npm:@types/react-dom@19.2.3",
+          "npm:@types/react@19.2.17",
+          "npm:class-variance-authority@0.7.1",
+          "npm:clsx@2.1.1",
+          "npm:react@19.2.0",
+          "npm:tailwind-merge@3.3.1"
         ]
       }
     }

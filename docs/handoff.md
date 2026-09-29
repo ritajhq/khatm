@@ -291,18 +291,20 @@ khatm is an Ensemble project, so the split follows Ensemble's rule: `core` speak
 | `source/core/deployment` | The apply flow behind ports (revision store, apply lock, workers, traffic, migrator, secrets, artifacts): plan, blue/green swap, health checks, crash restart, rollback. In-memory fakes for tests | orchestrator |
 | `source/core/bundle` | Builds a revision's reproducibility bundle: manifests, lock, required secrets, branding, `plan.md` and the ejected `auth.ts`; verifies a bundle is consistent | orchestrator, cli |
 | `source/core/registry` | Plugin and capability registries: option schemas, factories, derivation rules, known `manual` steps per version | orchestrator, worker, console |
-| `source/core/contract` | The control API: procedure names with input and output schemas (`khatm.plan`, `apply`, `rollback`, `status`, `history`, `events`) and the error codes | orchestrator (server), `core/client` |
+| `source/core/contract` | The control API: procedure names with input and output schemas (`khatm.plan`, `apply`, `rollback`, `status`, `history`, `events`, `export`, `manifest`) and the error codes. `@khatm/contract/guard` generates the idhn guard manifests from the procedures | orchestrator (server), `core/client`, cli |
 | `source/core/client` | SDK: connection (HTTP or Unix socket), sending the caller's session headers, typed `client.api.plan(...)` calls | cli, console |
 | `source/libs/supervisor` | Child process lifecycle and a switchable reverse proxy, nothing auth-specific | orchestrator |
+| `source/libs/ui` | shadcn-style React components (button, card, input, table, ...) shared by the login and console apps | login, console |
 | `source/apps/orchestrator` | PID 1: supervisor, proxy, control API, revision store, apply lock | — |
 | `source/apps/worker` | The Better Auth process, built from a resolved manifest it is handed at start | — |
 | `source/apps/cli` | Commands, prompts, table output | Operators, scripts |
-| `source/apps/console/{server,client}` | Forms, diffs, live preview, user admin. Stateless | Whoever idhn lets in |
+| `source/apps/console` | `server.ts` serves the built SPA, relays `POST /control/<procedure>` to the control API and renders branding previews; `src/` is the React app (overview, revisions, configuration forms, branding). Stateless | Whoever idhn lets in |
 | `source/core/pages` | What the hosted pages need from a resolved manifest: `PageConfig`, message catalog, `safeReturnTo`, theme CSS. Pure, used by the worker and the login app | worker, login |
 | `source/apps/login` | Hosted sign-in pages (React, Tailwind, shadcn-style components), built to static files the worker serves | End users |
 | `source/ship/khatm` | The auth image: orchestrator and worker | — |
 | `source/ship/console` | The console image | — |
 | `source/ship/guard/control` | The idhn guard manifest for the control API, one action per contract procedure | Consumers' idhn deployment |
+| `source/ship/guard/console` | The idhn guard manifest for the console: `console.relay` (with the procedure as a fact) and `console.visit` | Consumers' idhn deployment |
 | `ci/khatm/delivery.yml` | Dev stack: Postgres plus khatm, run with `ens develop khatm`. Other dialects are tested against their own database entries | Contributors |
 
 Consumers deploy khatm as two `compute` entries in their own delivery manifest: `khatm` with one replica and `khatm-console` with as many as they like, each behind an idhn guard. For portal, they replace today's `auth` and `auth-web` computes and the `auth-migrate` and `grant-admin` tasks.
@@ -470,6 +472,15 @@ Working backwards from a demo where `apply` swaps a running instance:
    - A Playwright test drives real Chromium through the proxy: sign up, sign in by username, a wrong password, `return_to` to a stranger falling back to the landing app, a token reaching the page, and Italian copy chosen by browser language, with no console errors.
    - Not done: passkey, 2FA and password-reset pages (their plugins aren't in the registry yet), assets such as a logo, dark mode toggling beyond the system preference, and email templates.
    - Build: `deno task build` in `apps/login` runs esbuild and the Tailwind CLI directly, because `@ritaj/ui` and `@ritaj/design` are not published and Ensemble's `ens` build can't be run in this environment. The worker reads the result from `KHATM_LOGIN_DIST` (default `apps/login/dist`); wrapping the same build in an Ensemble target is left for the delivery step. The workspace sets `nodeModulesDir: auto` for this.
-6. Console image and the control API's idhn guard manifest: config forms from schemas, branding preview, running behind idhn with several instances.
+6. (done, `feat/orchestrator`) Console and the idhn guard manifests. What exists:
+   - `@khatm/contract/guard` generates both guard manifests from a resolved manifest, and `khatm guard <control|console> <manifest.json>` prints them. The shipped files in `source/ship/guard` are the output for the portal fixture, and a test keeps them in sync. Both parse with idhn's own manifest loader.
+   - The control manifest has one `POST /<procedure>` action per procedure, with facts for policies: `confirmed` and `reason` on apply, `revision` and `confirmed` on rollback, `revision` on export and manifest.
+   - Only the `session-cookie` scheme is listed for now. `session-bearer` waits until khatm derives the `bearer` and `deviceAuthorization` plugins for the remote CLI.
+   - `apps/console` is a stateless server plus a React SPA built with the same esbuild and Tailwind setup as the login app. The server relays only `cookie`, `authorization` and `content-type` to the control URL, and only for known procedures, so the guard in front of the control port sees the same session the console's guard saw.
+   - Screens: overview (active revision and events), revisions (download a bundle, roll back with confirmation), configuration (plugins toggled on and off, their options as forms generated from the registry schemas), and branding (tokens and name, with a live preview). Every change goes through Plan, then Apply with the plan's base revision and, for restart or destructive plans, a confirmation.
+   - The branding preview is rendered by the console server from the draft with `core/pages`, in a same-origin iframe, without calling the worker.
+   - A Playwright test runs two console instances behind a stub authn-only guard: anonymous calls get 401, an operator signs up on the hosted login, turns the username plugin on through its form, plans and applies (the revision's author is the user id), then rolls back from the other instance, and the branding preview picks up a token change.
+   - Checked by hand with idhn's real standalone guard (`feat/session-bearer`, `ENFORCEMENT=authn-only`) in front of the control port and the console relaying to it: no cookie gets 401, a session reaches the orchestrator, and a spoofed `x-idhn-subject` is replaced by the guard, so the recorded author is the real user id.
+   - Not done: the console isn't derived as an `Application`, so operators add it to `applications` themselves for now; no `logs.stream` or live status subscription (the overview reloads events on demand); no message (copy) editor in branding; no data-plane screens, which are step 7.
 7. Identity administration and the audit log.
 8. Scoped CSS, slots, headless mode, `doctor`.

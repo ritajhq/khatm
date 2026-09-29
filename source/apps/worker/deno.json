@@ -1,6 +1,6 @@
 {
   "name": "@khatm/worker",
-  "exports": "./index.ts",
+  "exports": "./main.ts",
   "imports": {
     "@std/assert": "jsr:@std/assert@1.0.14",
     "better-auth": "npm:better-auth@^1.7.3",

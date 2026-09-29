@@ -1,14 +1,14 @@
-import type { MessageId } from '@khatm/pages'
-import { usePage } from '../lib/context.tsx'
-import { Layout } from '../components/layout.tsx'
-import { Button } from '../components/ui/button.tsx'
 import {
+  Button,
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from '../components/ui/card.tsx'
+} from '@khatm-libs/ui'
+import type { MessageId } from '@khatm/pages'
+import { usePage } from '../lib/context.tsx'
+import { Layout } from '../components/layout.tsx'
 
 /** A page that only says something: an error, or that sign-in is turned off. */
 export function Notice(

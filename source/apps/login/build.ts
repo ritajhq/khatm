@@ -14,6 +14,8 @@ const result = await esbuild.build({
   alias: {
     '@khatm/pages':
       new URL('../../core/pages/index.ts', import.meta.url).pathname,
+    '@khatm-libs/ui':
+      new URL('../../libs/ui/index.ts', import.meta.url).pathname,
     '@khatm/spec':
       new URL('../../core/spec/index.ts', import.meta.url).pathname,
   },

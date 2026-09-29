@@ -4,13 +4,10 @@
     "@std/assert": "jsr:@std/assert@1.0.14",
     "better-auth/client": "npm:better-auth@^1.7.3/client",
     "better-auth/client/plugins": "npm:better-auth@^1.7.3/client/plugins",
-    "class-variance-authority": "npm:class-variance-authority@0.7.1",
-    "clsx": "npm:clsx@2.1.1",
     "esbuild": "npm:esbuild@0.25.10",
     "react": "npm:react@19.2.0",
     "react-dom": "npm:react-dom@19.2.0",
     "react-dom/client": "npm:react-dom@19.2.0/client",
-    "tailwind-merge": "npm:tailwind-merge@3.3.1",
     "tailwindcss": "npm:tailwindcss@4.1.13",
     "@tailwindcss/cli": "npm:@tailwindcss/cli@4.1.13"
   },

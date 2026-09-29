@@ -138,7 +138,8 @@ Deno.test('buildBundle: refuses a revision whose manifest digest is not the reso
 
 Deno.test('eject: auth.ts is plain Better Auth that builds what khatm would', async () => {
   const bundle = await buildBundle(await input())
-  const dir = Deno.makeTempDirSync({ dir: '.' })
+  // Inside this package, so the ejected file resolves better-auth from its imports.
+  const dir = Deno.makeTempDirSync({ dir: import.meta.dirname })
   const env = {
     AUTH_SECRET_1: 'secret-one-with-plenty-of-entropy-00000001',
     AUTH_SECRET_2: 'secret-two-with-plenty-of-entropy-00000002',
@@ -147,7 +148,7 @@ Deno.test('eject: auth.ts is plain Better Auth that builds what khatm would', as
   for (const [name, value] of Object.entries(env)) Deno.env.set(name, value)
   try {
     Deno.writeTextFileSync(`${dir}/auth.ts`, bundle['auth.ts'])
-    const { auth: ejected } = await import(`${Deno.cwd()}/${dir}/auth.ts`)
+    const { auth: ejected } = await import(`${dir}/auth.ts`)
     const { auth: built, close } = createAuth(
       (await input()).resolved,
       {

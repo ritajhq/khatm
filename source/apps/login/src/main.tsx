@@ -21,6 +21,9 @@ const root = document.getElementById('root')
 if (!root) throw new Error('No #root element')
 createRoot(root).render(
   <PageProvider config={config} languages={navigator.languages}>
-    <Screen path={location.pathname} enabled={hasSignInMethod(config)} />
+    <Screen
+      path={`/${location.pathname.split('/').pop()}`}
+      enabled={hasSignInMethod(config)}
+    />
   </PageProvider>,
 )

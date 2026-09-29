@@ -106,7 +106,11 @@ export class ManagedProcess {
     const encoder = new TextEncoder()
     let pending = ''
     try {
-      for await (const chunk of stream.pipeThrough(new TextDecoderStream())) {
+      for await (
+        const chunk of stream.pipeThrough(
+          new TextDecoderStream() as TransformStream<Uint8Array, string>,
+        )
+      ) {
         pending += chunk
         const lines = pending.split('\n')
         pending = lines.pop() ?? ''

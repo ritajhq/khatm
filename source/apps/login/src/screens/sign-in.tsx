@@ -1,3 +1,12 @@
+import {
+  Alert,
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@khatm-libs/ui'
 import { type FormEvent, useState } from 'react'
 import { safeReturnTo } from '@khatm/pages'
 import { authClient } from '../lib/auth-client.ts'
@@ -5,15 +14,6 @@ import { usePage } from '../lib/context.tsx'
 import { Layout } from '../components/layout.tsx'
 import { Field } from '../components/field.tsx'
 import { SocialButtons } from '../components/social-buttons.tsx'
-import { Alert } from '../components/ui/alert.tsx'
-import { Button } from '../components/ui/button.tsx'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '../components/ui/card.tsx'
 
 export function SignIn() {
   const { config, t } = usePage()

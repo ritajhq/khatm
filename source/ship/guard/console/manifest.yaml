@@ -1,0 +1,31 @@
+id: khatm_console
+protocol: http
+authentication:
+  - scheme: session-cookie
+    session_url: 'http://auth:4100/api/auth/get-session'
+    issuer: portal
+    claims:
+      - username
+      - email
+      - name
+      - emailVerified
+      - role
+    cookie: __Secure-better-auth.session_token
+actions:
+  - name: console.relay
+    match:
+      method: POST
+      path: '/control/:procedure'
+    extract:
+      - from:
+          property: path
+          using: procedure
+        as: procedure
+  - name: console.visit
+    match:
+      method:
+        - GET
+        - HEAD
+      path:
+        - /
+        - /*rest

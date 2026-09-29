@@ -1,6 +1,9 @@
 {
   "name": "@khatm/registry",
-  "exports": "./index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./test-fixtures": "./test-fixtures.ts"
+  },
   "imports": {
     "@std/assert": "jsr:@std/assert@1.0.14",
     "zod": "npm:zod@^4.1.0"

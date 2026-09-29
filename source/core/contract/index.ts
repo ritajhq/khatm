@@ -7,6 +7,7 @@ export {
   history,
   Impact,
   type Input,
+  manifest,
   type Output,
   plan,
   PlanStepView,

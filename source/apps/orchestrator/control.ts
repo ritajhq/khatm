@@ -118,6 +118,8 @@ export class ControlService {
         return this.status()
       case 'khatm.history':
         return this.history(i.limit as number)
+      case 'khatm.manifest':
+        return this.manifest(i.revision as string | undefined)
       case 'khatm.export':
         return this.export(i.revision as string | undefined)
       case 'khatm.events':
@@ -196,7 +198,7 @@ export class ControlService {
     }
   }
 
-  private async export(revisionId: string | undefined) {
+  private async state(revisionId: string | undefined) {
     const id = revisionId ?? this.runtime.deployment.activeRevision?.id
     if (id === undefined) {
       throw new ControlError(
@@ -206,6 +208,22 @@ export class ControlService {
     }
     const state = await this.runtime.store.find(id)
     if (!state) throw new UnknownRevisionError(id)
+    return state
+  }
+
+  private async manifest(revisionId: string | undefined) {
+    const state = await this.state(revisionId)
+    return {
+      revision: revisionView(state.revision),
+      ...(state.authored === undefined
+        ? {}
+        : { authored: state.authored as Record<string, unknown> }),
+      resolved: JSON.parse(JSON.stringify(state.resolved)),
+    }
+  }
+
+  private async export(revisionId: string | undefined) {
+    const state = await this.state(revisionId)
     return {
       revision: revisionView(state.revision),
       files: { ...(await this.runtime.bundles.build(state)) },

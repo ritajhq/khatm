@@ -1,0 +1,85 @@
+id: khatm_control
+protocol: http
+authentication:
+  - scheme: session-cookie
+    session_url: 'http://auth:4100/api/auth/get-session'
+    issuer: portal
+    claims:
+      - username
+      - email
+      - name
+      - emailVerified
+      - role
+    cookie: __Secure-better-auth.session_token
+actions:
+  - name: khatm.plan
+    match:
+      method: POST
+      path: /khatm.plan
+  - name: khatm.apply
+    match:
+      method: POST
+      path: /khatm.apply
+    extract:
+      - from:
+          property: body
+          using: confirmed
+          type: json
+        as: confirmed
+        optional: true
+      - from:
+          property: body
+          using: reason
+          type: json
+        as: reason
+        optional: true
+  - name: khatm.rollback
+    match:
+      method: POST
+      path: /khatm.rollback
+    extract:
+      - from:
+          property: body
+          using: revision
+          type: json
+        as: revision
+      - from:
+          property: body
+          using: confirmed
+          type: json
+        as: confirmed
+        optional: true
+  - name: khatm.status
+    match:
+      method: POST
+      path: /khatm.status
+  - name: khatm.history
+    match:
+      method: POST
+      path: /khatm.history
+  - name: khatm.events
+    match:
+      method: POST
+      path: /khatm.events
+  - name: khatm.export
+    match:
+      method: POST
+      path: /khatm.export
+    extract:
+      - from:
+          property: body
+          using: revision
+          type: json
+        as: revision
+        optional: true
+  - name: khatm.manifest
+    match:
+      method: POST
+      path: /khatm.manifest
+    extract:
+      - from:
+          property: body
+          using: revision
+          type: json
+        as: revision
+        optional: true

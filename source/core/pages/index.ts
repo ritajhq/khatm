@@ -11,3 +11,4 @@ export {
   safeReturnTo,
 } from './page-config.ts'
 export { themeCss } from './theme.ts'
+export { type RenderedPage, renderPage } from './render.ts'

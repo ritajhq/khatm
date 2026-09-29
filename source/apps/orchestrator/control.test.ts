@@ -127,6 +127,12 @@ Deno.test('control: plan, apply, status and history over the Unix socket', async
     const back = await t.api.rollback({ revision: applied.revision.id })
     assertEquals(back.revision.manifest, applied.revision.manifest)
 
+    const shown = await t.api.manifest({})
+    assertEquals(shown.revision.id, back.revision.id)
+    assertEquals(
+      (shown.authored as { auth: { baseURL: string } }).auth.baseURL,
+      'https://auth.example.com',
+    )
     const exported = await t.api.export({ revision: applied.revision.id })
     assertEquals(exported.revision.id, applied.revision.id)
     assertEquals(

@@ -137,6 +137,21 @@ export const exportBundle = procedure(
   }),
 )
 
+export const manifest = procedure(
+  'khatm.manifest',
+  z.object({
+    /** Defaults to the active revision. */
+    revision: z.string().optional(),
+  }),
+  z.object({
+    revision: RevisionView,
+    /** What the operator wrote; absent for revisions recorded before it was kept. */
+    authored: z.record(z.string(), z.unknown()).optional(),
+    /** What the worker was built from. Secret references only, never values. */
+    resolved: z.record(z.string(), z.unknown()),
+  }),
+)
+
 export const procedures = {
   plan,
   apply,
@@ -145,6 +160,7 @@ export const procedures = {
   history,
   events,
   export: exportBundle,
+  manifest,
 }
 export type Procedures = typeof procedures
 export type ProcedureName = Procedures[keyof Procedures]['name']

@@ -236,3 +236,23 @@ Deno.test("cli: import applies the bundle's authored manifest, and refuses a bro
     assertEquals(calls.length, 2)
   })
 })
+
+Deno.test('cli: guard prints the control manifest without reaching the orchestrator', async () => {
+  const manifest = {
+    auth: {
+      baseURL: 'https://auth.example.com',
+      secrets: [{ version: 1, value: { env: 'S' } }],
+      database: { dialect: 'sqlite', url: { env: 'D' } },
+      session: {
+        introspectionURL: 'http://auth:4100/api/auth/get-session',
+        issuer: 'example',
+        claims: ['email'],
+      },
+    },
+  }
+  const c = capture({ 'm.json': JSON.stringify(manifest) })
+  assertEquals(await run(['guard', 'control', 'm.json'], c.io), 0)
+  assertStringIncludes(c.out.join('\n'), 'id: khatm_control')
+  assertStringIncludes(c.out.join('\n'), 'path: /khatm.apply')
+  assertEquals(await run(['guard', 'elsewhere', 'm.json'], capture().io), 2)
+})

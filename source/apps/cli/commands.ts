@@ -1,6 +1,13 @@
 import { parseArgs } from 'node:util'
 import { Client, ControlError } from '@khatm/client'
 import { verifyBundle } from '@khatm/bundle'
+import {
+  consoleGuardManifest,
+  controlGuardManifest,
+  toYaml,
+} from '@khatm/contract/guard'
+import { defaultRegistry } from '@khatm/registry'
+import { parseManifest } from '@khatm/spec'
 import type { PlanView, RevisionView } from '@khatm/contract'
 
 export interface Io {
@@ -50,6 +57,8 @@ Commands:
   rollback <revision>        Apply an earlier revision's manifest again (--yes)
   export [revision]          Write a revision's bundle to a directory (--out dir)
   import <dir>               Apply the manifest in an exported bundle (--yes)
+  guard <control|console> <manifest.json>
+                             Print the idhn guard manifest for that surface
   status                     Which revision is serving
   history                    Past revisions, newest first (--limit N)
   events                     Recent deployment events (--limit N)
@@ -88,6 +97,27 @@ export async function run(
   if (parsed.values.help || command === undefined) {
     io.out(USAGE)
     return command === undefined && !parsed.values.help ? 2 : 0
+  }
+
+  if (command === 'guard') {
+    const [, surface, file] = parsed.positionals
+    if ((surface !== 'control' && surface !== 'console') || !file) {
+      io.err('khatm guard: give control or console, then a manifest file')
+      return 2
+    }
+    try {
+      const resolved = defaultRegistry().resolve(
+        parseManifest(await readManifest(io, file)),
+      )
+      io.out(toYaml(
+        surface === 'control'
+          ? controlGuardManifest(resolved)
+          : consoleGuardManifest(resolved),
+      ))
+      return 0
+    } catch (error) {
+      return report(io, error)
+    }
   }
 
   const needsTarget = ['plan', 'apply', 'rollback', 'import'].includes(command)

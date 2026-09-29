@@ -29,6 +29,13 @@ export class Registry {
     this.plugins = new Map(plugins.map((plugin) => [plugin.kind, plugin]))
   }
 
+  /** Every plugin kind the registry knows, in name order. */
+  list(): PluginDefinition[] {
+    return [...this.plugins.values()].sort((a, b) =>
+      a.kind.localeCompare(b.kind)
+    )
+  }
+
   plugin(kind: string): PluginDefinition | undefined {
     return this.plugins.get(kind)
   }
