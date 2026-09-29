@@ -187,9 +187,13 @@ async function scenario(
     )
     await assertRejects(() => runtime.deployment.apply(stale, admin))
     assertEquals((await runtime.store.history()).length, 3)
+    assertEquals(
+      Deno.readLinkSync(`${dir}/artifacts/current`),
+      (await runtime.store.active())?.revision.id,
+    )
     assert(
       Deno.statSync(
-        `${dir}/artifacts/revisions/${first.revision.id}/manifest.json`,
+        `${dir}/artifacts/${first.revision.id}/manifest.json`,
       ).isFile,
     )
   } finally {

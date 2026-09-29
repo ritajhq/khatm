@@ -1,4 +1,5 @@
 import {
+  type Json,
   type ResolvedManifest,
   Revision,
   type SecretFingerprints,
@@ -44,7 +45,8 @@ export async function migrateStore(client: SqlClient): Promise<void> {
        reason TEXT,
        created_at TEXT NOT NULL,
        resolved TEXT NOT NULL,
-       fingerprints TEXT NOT NULL)`,
+       fingerprints TEXT NOT NULL,
+       authored TEXT)`,
     `CREATE TABLE IF NOT EXISTS ${t.state} (
        id INTEGER PRIMARY KEY, active_revision TEXT)`,
     `CREATE TABLE IF NOT EXISTS ${t.lock} (
@@ -111,8 +113,8 @@ export class SqlRevisionStore implements RevisionStore {
     const { revision } = state
     await this.client.execute(
       `INSERT INTO ${this.t.revisions}
-         (id, parent, manifest, author, reason, created_at, resolved, fingerprints)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         (id, parent, manifest, author, reason, created_at, resolved, fingerprints, authored)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (id) DO NOTHING`,
       [
         revision.id,
@@ -123,6 +125,7 @@ export class SqlRevisionStore implements RevisionStore {
         revision.createdAt.toISOString(),
         JSON.stringify(state.resolved),
         JSON.stringify(state.fingerprints),
+        state.authored === undefined ? null : JSON.stringify(state.authored),
       ],
     )
     // Compare-and-swap: only moves the pointer if nobody else has.
@@ -162,6 +165,9 @@ function toState(row: Record<string, unknown>): ActiveState {
     }),
     resolved: JSON.parse(String(row.resolved)) as ResolvedManifest,
     fingerprints: JSON.parse(String(row.fingerprints)) as SecretFingerprints,
+    authored: row.authored === null || row.authored === undefined
+      ? undefined
+      : (JSON.parse(String(row.authored)) as Json),
   }
 }
 

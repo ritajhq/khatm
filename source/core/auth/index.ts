@@ -15,6 +15,7 @@ export {
   planMigrations,
   runMigrations,
 } from './migrations.ts'
+export { betterAuthVersion } from './version.ts'
 export { buildPlugin, UnknownPluginError } from './plugins.ts'
 export {
   fingerprint,

@@ -12,6 +12,7 @@ import {
 } from '@khatm/deployment'
 import { SwitchableProxy } from '@khatm-libs/supervisor'
 import { ControlService, EventLog, serveControl } from './control.ts'
+import { Bundles } from './bundles.ts'
 import { openSql } from './sql.ts'
 import { migrateStore, SqlRevisionStore } from './stores.ts'
 
@@ -62,7 +63,12 @@ async function setup() {
     drainMs: 0,
   })
   const service = new ControlService(
-    { deployment, store, proxy: new SwitchableProxy() },
+    {
+      deployment,
+      store,
+      proxy: new SwitchableProxy(),
+      bundles: new Bundles(store, undefined),
+    },
     log,
   )
   const socket = `${dir}/control.sock`
@@ -120,6 +126,17 @@ Deno.test('control: plan, apply, status and history over the Unix socket', async
     ])
     const back = await t.api.rollback({ revision: applied.revision.id })
     assertEquals(back.revision.manifest, applied.revision.manifest)
+
+    const exported = await t.api.export({ revision: applied.revision.id })
+    assertEquals(exported.revision.id, applied.revision.id)
+    assertEquals(
+      JSON.parse(exported.files['manifest.authored.json']).auth.baseURL,
+      'https://auth.example.com',
+    )
+    assertEquals(
+      (await t.api.export({})).revision.id,
+      back.revision.id,
+    )
 
     const events = await t.api.events({ limit: 3 })
     assertEquals(events.events.length, 3)

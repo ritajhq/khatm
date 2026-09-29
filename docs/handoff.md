@@ -289,6 +289,7 @@ khatm is an Ensemble project, so the split follows Ensemble's rule: `core` speak
 | `source/core/spec` | Domain types and schemas (Manifest, Revision, AuthSpec, Application, SessionContract, BrandingSpec), `resolve()`, canonical serialization, `plan(current, desired)`. Pure, no I/O. | Everything |
 | `source/core/auth` | Builds `betterAuth()` from a resolved manifest: database opening per dialect, plugin factories, secret resolution and fingerprints, the migration dry run and runner. The registry keeps schemas and derivations only | worker, orchestrator |
 | `source/core/deployment` | The apply flow behind ports (revision store, apply lock, workers, traffic, migrator, secrets, artifacts): plan, blue/green swap, health checks, crash restart, rollback. In-memory fakes for tests | orchestrator |
+| `source/core/bundle` | Builds a revision's reproducibility bundle: manifests, lock, required secrets, branding, `plan.md` and the ejected `auth.ts`; verifies a bundle is consistent | orchestrator, cli |
 | `source/core/registry` | Plugin and capability registries: option schemas, factories, derivation rules, known `manual` steps per version | orchestrator, worker, console |
 | `source/core/contract` | The control API: procedure names with input and output schemas (`khatm.plan`, `apply`, `rollback`, `status`, `history`, `events`) and the error codes | orchestrator (server), `core/client` |
 | `source/core/client` | SDK: connection (HTTP or Unix socket), sending the caller's session headers, typed `client.api.plan(...)` calls | cli, console |
@@ -352,11 +353,11 @@ Every apply writes a bundle so that, given the bundle and the same database, any
 | `revision.json` | Revision id, parent, author, time, reason, manifest digest |
 | `lock.json` | Orchestrator image digest, Better Auth version, each plugin's version, registry schema version, secret fingerprints per ref |
 | `secrets.required.json` + `.env.example` | Every referenced secret with a description |
-| `migrations/` | SQL this revision needs, reviewable by a DBA |
+| `migrations/` | SQL this revision needs, reviewable by a DBA. **Not built yet:** Better Auth's `compileMigrations()` only produces the delta against a live database, so a deterministic full-schema file needs a scratch database per dialect |
 | `branding/` | Tokens, message bundles, custom CSS, assets, content-hashed |
 | `plan.md` | Human-readable diff from the parent revision with impact levels |
 | `auth.ts` | Eject file: equivalent plain Better Auth code, capabilities turned into stubs |
-| `deploy/` | Delivery manifest `compute` entries for Ensemble, pinned to the image digests, and the rendered idhn `authentication` block |
+| `deploy/` | Delivery manifest `compute` entries for Ensemble, pinned to the image digests, and the rendered idhn `authentication` block. **Not built yet** |
 
 The eject file removes lock-in: anyone can leave the orchestrator and embed Better Auth directly, its native model. It also lets operators read exactly what gets built.
 
@@ -364,14 +365,15 @@ The eject file removes lock-in: anyone can leave the orchestrator and embed Bett
 
 - Order: bundle written before migration and traffic switch; a write failure fails the apply.
 - Atomic: write to a temp directory, then rename.
-- Location: `/artifacts/<revision-id>/` on a volume, plus revision history and hashes in the database. Bundles are deterministic, so a lost volume can be regenerated.
-- `/artifacts/current` symlinks to the active revision.
+- Location: `<artifacts>/<revision-id>/` on a volume (`KHATM_ARTIFACTS`), plus revision history and hashes in the database. Bundles are deterministic, so a lost volume can be regenerated.
+- `<artifacts>/current` symlinks to the active revision, moved after the revision is recorded as active.
+- Bundles are built by `core/bundle` from the recorded state (resolved manifest, authored manifest, fingerprints, parent), so any past revision's bundle can be regenerated, which is what `export` does. The revision store keeps the authored manifest for that reason.
 - Retention: keep all by default, optional `keepLast: n`; never prune the active revision or its parent.
 - Artifacts never contain user data or PII.
 
 ### Round trip
 
-- `export <revision>` returns a bundle; `import <bundle>` runs through the normal plan and apply flow.
+- `khatm export [revision]` (control procedure `khatm.export`, active revision by default) writes a bundle directory; `khatm import <dir>` checks that the bundle's manifest, revision and lock agree, then plans and applies its `manifest.authored.json` like any other apply. The lock is checked for consistency only; comparing image and Better Auth versions against the running instance is not done yet. Verified by exporting from one running orchestrator and importing into another: identical manifest digests.
 - Exporting from a console-configured instance and committing `manifest.authored.json` to Git is the migration path to file mode.
 - `manifest.json` and `lock.json` together answer "is what's running what I exported?": same manifest digest, same lock (image, versions, secret fingerprints). Recording or signing each bundle's hash lets you verify later that what's running matches what was exported.
 
@@ -458,7 +460,7 @@ Working backwards from a demo where `apply` swaps a running instance:
 1. (done) `core/spec` and `core/registry`: AuthSpec schema for portal's plugin set (email and password, username, admin) plus `Application` and `SessionContract`, canonical serialization, `plan()` with impact classification.
 2. (done, `feat/orchestrator`) Orchestrator: supervisor, child worker built from a resolved manifest, reverse proxy, health checks, blue/green swap, revision storage, apply lock. Built and tested end to end on SQLite and Postgres. MySQL and MSSQL are declared in the spec, but `openDatabase` refuses them until their Deno drivers are chosen; the SQL stores also cover only SQLite and Postgres for now.
 3. (done, `feat/orchestrator`) `core/contract` + `core/client` + minimal CLI (Unix socket first): `plan`, `apply`, `status`, `history`, `events`, `rollback`. The control port trusts `x-idhn-subject` for the caller, the socket is `socket`. The CLI over HTTP with a bearer token waits for the console step.
-4. Artifact bundle on apply, then `export`/`import` and the `auth.ts` eject file.
+4. (done, `feat/orchestrator`) Artifact bundle on apply, then `export`/`import` and the `auth.ts` eject file. Missing from the bundle: `migrations/` and `deploy/` (see Bundle contents). `core/bundle` is the new package; a test loads the generated `auth.ts` and checks it builds the same options as `createAuth`.
 5. Hosted login pages with design tokens and copy overrides.
 6. Console image and the control API's idhn guard manifest: config forms from schemas, branding preview, running behind idhn with several instances.
 7. Identity administration and the audit log.

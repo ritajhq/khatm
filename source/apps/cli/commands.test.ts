@@ -52,11 +52,13 @@ async function withServer(
 const ok = (body: unknown) => () => Response.json(body)
 
 function capture(files: Record<string, string> = {}) {
+  const written: Record<string, string> = {}
   const out: string[] = []
   const err: string[] = []
   return {
     out,
     err,
+    written,
     io: {
       out: (line: string) => out.push(line),
       err: (line: string) => err.push(line),
@@ -65,6 +67,15 @@ function capture(files: Record<string, string> = {}) {
           ? Promise.resolve(files[path])
           : Promise.reject(new Error('no such file')),
       env: () => undefined,
+      writeFile: (path: string, content: string) => {
+        written[path] = content
+        return Promise.resolve()
+      },
+      readTree: (dir: string) =>
+        Promise.resolve(Object.fromEntries(
+          Object.entries(files).filter(([p]) => p.startsWith(`${dir}/`))
+            .map(([p, c]) => [p.slice(dir.length + 1), c]),
+        )),
     },
   }
 }
@@ -162,4 +173,66 @@ Deno.test('cli: misuse exits 2 and an unreachable socket exits 1', async () => {
     1,
   )
   assertStringIncludes(c.err.join('\n'), "Can't reach")
+})
+
+Deno.test('cli: export writes every file of the bundle into --out', async () => {
+  await withServer({
+    'khatm.export': ok({
+      revision,
+      files: { 'manifest.json': '{}', 'branding/tokens.json': '{}' },
+    }),
+  }, async (socket, calls) => {
+    const c = capture()
+    assertEquals(
+      await run(['export', 'rev-2', '--out', 'out', '--socket', socket], c.io),
+      0,
+    )
+    assertEquals(calls[0].body, { revision: 'rev-2' })
+    assertEquals(Object.keys(c.written).sort(), [
+      'out/branding/tokens.json',
+      'out/manifest.json',
+    ])
+  })
+})
+
+Deno.test("cli: import applies the bundle's authored manifest, and refuses a broken bundle", async () => {
+  const digest = `sha256:${'a'.repeat(64)}`
+  const resolved = '{"auth":{}}'
+  // A bundle that is internally consistent needs a real digest of manifest.json.
+  const { digestOf } = await import('@khatm/spec')
+  const manifestDigest = await digestOf(JSON.parse(resolved))
+  const bundle = {
+    'b/manifest.json': resolved,
+    'b/revision.json': JSON.stringify({
+      id: 'rev-9',
+      manifest: manifestDigest,
+    }),
+    'b/lock.json': JSON.stringify({ manifest: manifestDigest }),
+    'b/manifest.authored.json': '{"auth":{"from":"bundle"}}',
+  }
+  await withServer({
+    'khatm.plan': ok({
+      ...destructivePlan,
+      needsConfirmation: false,
+      impact: 'restart',
+    }),
+    'khatm.apply': ok({ revision, changed: true, plan: destructivePlan }),
+  }, async (socket, calls) => {
+    const good = capture(bundle)
+    assertEquals(await run(['import', 'b', '--socket', socket], good.io), 0)
+    assertEquals(calls[1].body, {
+      manifest: { auth: { from: 'bundle' } },
+      base: 'rev-1',
+      confirmed: false,
+      reason: 'import of revision rev-9',
+    })
+
+    const broken = capture({
+      ...bundle,
+      'b/lock.json': JSON.stringify({ manifest: digest }),
+    })
+    assertEquals(await run(['import', 'b', '--socket', socket], broken.io), 1)
+    assertStringIncludes(broken.err.join('\n'), 'not an intact bundle')
+    assertEquals(calls.length, 2)
+  })
 })

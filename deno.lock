@@ -344,6 +344,14 @@
           "npm:pg@^8.13.1"
         ]
       },
+      "source/core/bundle": {
+        "dependencies": [
+          "jsr:@std/assert@1.0.14",
+          "npm:@types/pg@^8.11.10",
+          "npm:better-auth@^1.7.3",
+          "npm:pg@^8.13.1"
+        ]
+      },
       "source/core/client": {
         "dependencies": [
           "jsr:@std/assert@1.0.14",

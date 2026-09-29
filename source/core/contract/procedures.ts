@@ -124,7 +124,28 @@ export const events = procedure(
   }),
 )
 
-export const procedures = { plan, apply, rollback, status, history, events }
+export const exportBundle = procedure(
+  'khatm.export',
+  z.object({
+    /** Defaults to the active revision. */
+    revision: z.string().optional(),
+  }),
+  z.object({
+    revision: RevisionView,
+    /** Bundle path to file content. */
+    files: z.record(z.string(), z.string()),
+  }),
+)
+
+export const procedures = {
+  plan,
+  apply,
+  rollback,
+  status,
+  history,
+  events,
+  export: exportBundle,
+}
 export type Procedures = typeof procedures
 export type ProcedureName = Procedures[keyof Procedures]['name']
 
@@ -139,6 +160,7 @@ export const ErrorCode = z.enum([
   'unresolved_secrets',
   'unknown_procedure',
   'unknown_revision',
+  'no_active_revision',
   'blocked',
   'confirmation_required',
   'apply_in_progress',
@@ -167,6 +189,7 @@ export const STATUS: Readonly<Record<ErrorCode, number>> = {
   unresolved_secrets: 422,
   unknown_procedure: 404,
   unknown_revision: 404,
+  no_active_revision: 404,
   blocked: 409,
   confirmation_required: 409,
   apply_in_progress: 409,

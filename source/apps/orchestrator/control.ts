@@ -20,7 +20,12 @@ import {
   UnknownRevisionError,
 } from '@khatm/deployment'
 import { defaultRegistry, UnresolvableManifestError } from '@khatm/registry'
-import { InvalidManifestError, parseManifest, type Revision } from '@khatm/spec'
+import {
+  InvalidManifestError,
+  type Json,
+  parseManifest,
+  type Revision,
+} from '@khatm/spec'
 import type { Runtime } from './runtime.ts'
 
 /** Who is calling, as the transport could tell: never something the body claims. */
@@ -62,7 +67,10 @@ export class ControlError extends Error {
 /** The control API's behavior, independent of how it is served. */
 export class ControlService {
   constructor(
-    private readonly runtime: Pick<Runtime, 'deployment' | 'store' | 'proxy'>,
+    private readonly runtime: Pick<
+      Runtime,
+      'deployment' | 'store' | 'proxy' | 'bundles'
+    >,
     private readonly log: EventLog,
   ) {}
 
@@ -110,6 +118,8 @@ export class ControlService {
         return this.status()
       case 'khatm.history':
         return this.history(i.limit as number)
+      case 'khatm.export':
+        return this.export(i.revision as string | undefined)
       case 'khatm.events':
         return Promise.resolve({ events: this.log.latest(i.limit as number) })
     }
@@ -186,9 +196,25 @@ export class ControlService {
     }
   }
 
+  private async export(revisionId: string | undefined) {
+    const id = revisionId ?? this.runtime.deployment.activeRevision?.id
+    if (id === undefined) {
+      throw new ControlError(
+        'no_active_revision',
+        'Nothing has been applied yet',
+      )
+    }
+    const state = await this.runtime.store.find(id)
+    if (!state) throw new UnknownRevisionError(id)
+    return {
+      revision: revisionView(state.revision),
+      files: { ...(await this.runtime.bundles.build(state)) },
+    }
+  }
+
   private planned(manifest: Record<string, unknown>) {
     const resolved = defaultRegistry().resolve(parseManifest(manifest))
-    return this.runtime.deployment.plan(resolved)
+    return this.runtime.deployment.plan(resolved, manifest as Json)
   }
 }
 

@@ -10,3 +10,6 @@ export {
   Registry,
   UnresolvableManifestError,
 } from './registry.ts'
+
+/** Bumped when the registry's schemas change shape, so a bundle's lock says what wrote it. */
+export const REGISTRY_SCHEMA_VERSION = 1

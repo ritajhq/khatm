@@ -15,6 +15,7 @@ import type {
   Worker,
   Workers,
 } from '@khatm/deployment'
+import type { Bundles } from './bundles.ts'
 import type { ResolvedManifest, SecretFingerprints } from '@khatm/spec'
 import {
   freePort,
@@ -96,20 +97,39 @@ export class ProcessWorkers implements Workers {
   }
 }
 
-/** Writes each activated revision's resolved manifest and revision record under a directory. */
+/**
+ * Writes each revision's bundle to `<directory>/<revision-id>/`, into a
+ * temporary directory first and then renamed, so a bundle is never half
+ * there. `current` is a symlink to the live revision.
+ */
 export class FileArtifacts implements Artifacts {
-  constructor(private readonly directory: string) {}
+  constructor(
+    private readonly directory: string,
+    private readonly bundles: Bundles,
+  ) {}
 
   async write(state: ActiveState): Promise<void> {
-    const dir = `${this.directory}/revisions/${state.revision.id}`
-    await Deno.mkdir(dir, { recursive: true })
-    await Deno.writeTextFile(
-      `${dir}/manifest.json`,
-      JSON.stringify(state.resolved, null, 2) + '\n',
-    )
-    await Deno.writeTextFile(
-      `${dir}/revision.json`,
-      JSON.stringify(state.revision, null, 2) + '\n',
-    )
+    const bundle = await this.bundles.build(state)
+    const target = `${this.directory}/${state.revision.id}`
+    const temp = `${this.directory}/.tmp-${state.revision.id}`
+    await Deno.remove(temp, { recursive: true }).catch(() => {})
+    for (const [path, content] of Object.entries(bundle)) {
+      await Deno.mkdir(dirname(`${temp}/${path}`), { recursive: true })
+      await Deno.writeTextFile(`${temp}/${path}`, content)
+    }
+    await Deno.remove(target, { recursive: true }).catch(() => {})
+    await Deno.rename(temp, target)
   }
+
+  async activated(state: ActiveState): Promise<void> {
+    const link = `${this.directory}/current`
+    const temp = `${this.directory}/.current-${state.revision.id}`
+    await Deno.remove(temp).catch(() => {})
+    await Deno.symlink(state.revision.id, temp)
+    await Deno.rename(temp, link)
+  }
+}
+
+function dirname(path: string): string {
+  return path.slice(0, path.lastIndexOf('/'))
 }

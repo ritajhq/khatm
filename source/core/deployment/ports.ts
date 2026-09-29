@@ -1,4 +1,5 @@
 import type {
+  Json,
   ManifestDigest,
   ResolvedManifest,
   Revision,
@@ -17,6 +18,8 @@ export interface ActiveState {
   readonly revision: Revision
   readonly resolved: ResolvedManifest
   readonly fingerprints: SecretFingerprints
+  /** What the operator wrote, as JSON; absent for states recorded before it was kept. */
+  readonly authored?: Json
 }
 
 /** Durable history. `activate` is a compare-and-swap on the active revision. */
@@ -76,6 +79,8 @@ export interface SecretResolver {
 /** Writes the reproducibility artifacts for a revision before it goes live. */
 export interface Artifacts {
   write(state: ActiveState): Promise<void>
+  /** Called once the revision is live, to point `current` at it. */
+  activated?(state: ActiveState): Promise<void>
 }
 
 export type DeploymentEvent =

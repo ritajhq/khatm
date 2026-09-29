@@ -1,5 +1,6 @@
 import { parseArgs } from 'node:util'
 import { Client, ControlError } from '@khatm/client'
+import { verifyBundle } from '@khatm/bundle'
 import type { PlanView, RevisionView } from '@khatm/contract'
 
 export interface Io {
@@ -7,6 +8,10 @@ export interface Io {
   err(line: string): void
   readFile(path: string): Promise<string>
   env(name: string): string | undefined
+  /** Writes a file, creating its directories. */
+  writeFile(path: string, content: string): Promise<void>
+  /** Every file under a directory, keyed by its path inside it. */
+  readTree(dir: string): Promise<Record<string, string>>
 }
 
 export const denoIo: Io = {
@@ -14,6 +19,24 @@ export const denoIo: Io = {
   err: (line) => console.error(line),
   readFile: (path) => Deno.readTextFile(path),
   env: (name) => Deno.env.get(name),
+  async writeFile(path, content) {
+    await Deno.mkdir(path.slice(0, path.lastIndexOf('/')) || '.', {
+      recursive: true,
+    })
+    await Deno.writeTextFile(path, content)
+  },
+  async readTree(dir) {
+    const files: Record<string, string> = {}
+    const walk = async (relative: string) => {
+      for await (const entry of Deno.readDir(`${dir}/${relative}`)) {
+        const path = relative ? `${relative}/${entry.name}` : entry.name
+        if (entry.isDirectory) await walk(path)
+        else files[path] = await Deno.readTextFile(`${dir}/${path}`)
+      }
+    }
+    await walk('')
+    return files
+  },
 }
 
 /** Exit codes: 0 done, 1 failed, 2 misuse, 3 needs the operator (confirmation or a manual step). */
@@ -25,6 +48,8 @@ Commands:
   plan <manifest.json>       Show what applying the manifest would change
   apply <manifest.json>      Apply it (--yes confirms destructive changes)
   rollback <revision>        Apply an earlier revision's manifest again (--yes)
+  export [revision]          Write a revision's bundle to a directory (--out dir)
+  import <dir>               Apply the manifest in an exported bundle (--yes)
   status                     Which revision is serving
   history                    Past revisions, newest first (--limit N)
   events                     Recent deployment events (--limit N)
@@ -32,6 +57,7 @@ Commands:
 Options:
   --socket <path>            Control socket (default $KHATM_SOCKET, else /run/khatm/control.sock)
   --reason <text>            Recorded with the revision
+  --out <dir>                Where export writes (default ./khatm-<revision>)
   --yes                      Confirm destructive changes
 `
 
@@ -50,6 +76,7 @@ export async function run(
         reason: { type: 'string' },
         yes: { type: 'boolean', default: false },
         limit: { type: 'string' },
+        out: { type: 'string' },
         help: { type: 'boolean', default: false },
       },
     })
@@ -63,19 +90,30 @@ export async function run(
     return command === undefined && !parsed.values.help ? 2 : 0
   }
 
-  const needsTarget = ['plan', 'apply', 'rollback'].includes(command)
+  const needsTarget = ['plan', 'apply', 'rollback', 'import'].includes(command)
   if (needsTarget && target === undefined) {
     io.err(
       `khatm ${command}: missing ${
-        command === 'rollback' ? 'revision' : 'manifest file'
+        command === 'rollback'
+          ? 'revision'
+          : command === 'import'
+          ? 'bundle directory'
+          : 'manifest file'
       }`,
     )
     return 2
   }
   if (
-    !['plan', 'apply', 'rollback', 'status', 'history', 'events'].includes(
-      command,
-    )
+    ![
+      'plan',
+      'apply',
+      'rollback',
+      'export',
+      'import',
+      'status',
+      'history',
+      'events',
+    ].includes(command)
   ) {
     io.err(`Unknown command: ${command}\n\n${USAGE}`)
     return 2
@@ -101,26 +139,43 @@ export async function run(
         )
         return 0
       }
-      case 'apply': {
-        const manifest = await readManifest(io, target)
-        const plan = await api.plan({ manifest })
-        printPlan(io, plan)
-        if (plan.isEmpty && plan.base !== undefined) return 0
-        if (plan.isBlocked) {
-          io.err('Blocked: do the manual steps above, then plan again.')
-          return 3
+      case 'apply':
+        return await applyManifest(
+          io,
+          api,
+          await readManifest(io, target),
+          parsed.values.yes,
+          parsed.values.reason,
+        )
+      case 'import': {
+        const files = await io.readTree(target)
+        const problems = await verifyBundle(files)
+        if (problems.length > 0) {
+          io.err(`${target} is not an intact bundle:`)
+          for (const problem of problems) io.err(`  ${problem}`)
+          return 1
         }
-        if (plan.needsConfirmation && !parsed.values.yes) {
-          io.err('Destructive changes need confirmation: run again with --yes.')
-          return 3
+        const authored = files['manifest.authored.json']
+        if (authored === undefined) {
+          io.err(`${target} has no manifest.authored.json to apply`)
+          return 1
         }
-        const result = await api.apply({
-          manifest,
-          base: plan.base,
-          confirmed: parsed.values.yes,
-          reason: parsed.values.reason,
-        })
-        io.out(`Applied revision ${result.revision.id}`)
+        const from = JSON.parse(files['revision.json']).id
+        return await applyManifest(
+          io,
+          api,
+          JSON.parse(authored),
+          parsed.values.yes,
+          parsed.values.reason ?? `import of revision ${from}`,
+        )
+      }
+      case 'export': {
+        const { revision, files } = await api.export({ revision: target })
+        const out = parsed.values.out ?? `./khatm-${revision.id}`
+        for (const [path, content] of Object.entries(files)) {
+          await io.writeFile(`${out}/${path}`, content)
+        }
+        io.out(`Wrote ${Object.keys(files).length} files to ${out}`)
         return 0
       }
       case 'rollback': {
@@ -213,4 +268,32 @@ function report(io: Io, error: unknown): ExitCode {
   }
   io.err(error instanceof Error ? error.message : String(error))
   return 1
+}
+
+async function applyManifest(
+  io: Io,
+  api: Client['api'],
+  manifest: Record<string, unknown>,
+  confirmed: boolean,
+  reason: string | undefined,
+): Promise<ExitCode> {
+  const plan = await api.plan({ manifest })
+  printPlan(io, plan)
+  if (plan.isEmpty && plan.base !== undefined) return 0
+  if (plan.isBlocked) {
+    io.err('Blocked: do the manual steps above, then plan again.')
+    return 3
+  }
+  if (plan.needsConfirmation && !confirmed) {
+    io.err('Destructive changes need confirmation: run again with --yes.')
+    return 3
+  }
+  const result = await api.apply({
+    manifest,
+    base: plan.base,
+    confirmed,
+    reason,
+  })
+  io.out(`Applied revision ${result.revision.id}`)
+  return 0
 }

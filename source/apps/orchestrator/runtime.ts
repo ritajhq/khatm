@@ -14,6 +14,7 @@ import {
   ProxyTraffic,
 } from './adapters.ts'
 import { EventLog } from './control.ts'
+import { Bundles } from './bundles.ts'
 import { openSql, type SqlClient } from './sql.ts'
 import {
   installationKey,
@@ -44,6 +45,7 @@ export interface Runtime {
   readonly proxy: SwitchableProxy
   readonly client: SqlClient
   readonly events: EventLog
+  readonly bundles: Bundles
   close(): Promise<void>
 }
 
@@ -54,6 +56,7 @@ export async function createRuntime(config: RuntimeConfig): Promise<Runtime> {
   const proxy = new SwitchableProxy()
   const events = new EventLog()
   const store = new SqlRevisionStore(client)
+  const bundles = new Bundles(store)
   const workers = new ProcessWorkers(config.workerEntry, config.workerEnv)
   const deployment = new Deployment({
     store,
@@ -65,7 +68,7 @@ export async function createRuntime(config: RuntimeConfig): Promise<Runtime> {
       await installationKey(client),
       config.secrets,
     ),
-    artifacts: new FileArtifacts(config.artifactsDirectory),
+    artifacts: new FileArtifacts(config.artifactsDirectory, bundles),
     events: {
       emit: (event) => {
         events.emit(event)
@@ -79,6 +82,7 @@ export async function createRuntime(config: RuntimeConfig): Promise<Runtime> {
     proxy,
     client,
     events,
+    bundles,
     async close() {
       await deployment.shutdown()
       await client.close()

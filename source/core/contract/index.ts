@@ -3,6 +3,7 @@ export {
   ErrorBody,
   ErrorCode,
   events,
+  exportBundle,
   history,
   Impact,
   type Input,

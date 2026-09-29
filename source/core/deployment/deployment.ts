@@ -1,4 +1,5 @@
 import {
+  type Json,
   type ManifestDigest,
   Plan,
   plan,
@@ -50,6 +51,8 @@ export interface PlannedApply {
   readonly fingerprints: SecretFingerprints
   readonly migration: MigrationPlan
   readonly plan: Plan
+  /** The authored manifest this plan came from, kept with the revision. */
+  readonly authored?: Json
 }
 
 export interface ApplyRequest {
@@ -129,7 +132,10 @@ export class Deployment {
     return state.revision
   }
 
-  async plan(desired: ResolvedManifest): Promise<PlannedApply> {
+  async plan(
+    desired: ResolvedManifest,
+    authored?: Json,
+  ): Promise<PlannedApply> {
     const active = await this.ports.store.active()
     const fingerprints = await this.ports.secrets.fingerprints(desired)
     const migration = await this.ports.migrator.plan(desired)
@@ -143,6 +149,7 @@ export class Deployment {
       resolved: desired,
       fingerprints,
       migration,
+      authored,
       plan: new Plan(config.base, config.desired, [
         ...config.steps,
         ...migrationSteps(migration),
@@ -154,7 +161,7 @@ export class Deployment {
   async planRollback(revisionId: string): Promise<PlannedApply> {
     const past = await this.ports.store.find(revisionId)
     if (!past) throw new UnknownRevisionError(revisionId)
-    return this.plan(past.resolved)
+    return this.plan(past.resolved, past.authored)
   }
 
   async apply(
@@ -206,6 +213,7 @@ export class Deployment {
       revision,
       resolved: planned.resolved,
       fingerprints: planned.fingerprints,
+      authored: planned.authored,
     }
     const emit = (event: Parameters<EventSink['emit']>[0]) =>
       this.ports.events?.emit(event)
@@ -236,6 +244,7 @@ export class Deployment {
       }
       this.serving = { worker, state }
       this.watch(worker, state)
+      await this.ports.artifacts.activated?.(state).catch(() => {})
       emit({
         type: 'apply.activated',
         revision: revision.id,
