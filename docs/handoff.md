@@ -290,8 +290,8 @@ khatm is an Ensemble project, so the split follows Ensemble's rule: `core` speak
 | `source/core/auth` | Builds `betterAuth()` from a resolved manifest: database opening per dialect, plugin factories, secret resolution and fingerprints, the migration dry run and runner. The registry keeps schemas and derivations only | worker, orchestrator |
 | `source/core/deployment` | The apply flow behind ports (revision store, apply lock, workers, traffic, migrator, secrets, artifacts): plan, blue/green swap, health checks, crash restart, rollback. In-memory fakes for tests | orchestrator |
 | `source/core/registry` | Plugin and capability registries: option schemas, factories, derivation rules, known `manual` steps per version | orchestrator, worker, console |
-| `source/core/contract` | The control API: procedure names with input and output schemas | orchestrator (server), `core/client` |
-| `source/core/client` | SDK: connection (HTTP or Unix socket), sending the caller's session, multi-step workflows | cli, console |
+| `source/core/contract` | The control API: procedure names with input and output schemas (`khatm.plan`, `apply`, `rollback`, `status`, `history`, `events`) and the error codes | orchestrator (server), `core/client` |
+| `source/core/client` | SDK: connection (HTTP or Unix socket), sending the caller's session headers, typed `client.api.plan(...)` calls | cli, console |
 | `source/libs/supervisor` | Child process lifecycle and a switchable reverse proxy, nothing auth-specific | orchestrator |
 | `source/apps/orchestrator` | PID 1: supervisor, proxy, control API, revision store, apply lock | — |
 | `source/apps/worker` | The Better Auth process, built from a resolved manifest it is handed at start | — |
@@ -333,7 +333,7 @@ Contract namespaces: `revisions.*`, `plan`, `apply`, `rollback`, `status`, `logs
 
 Guidelines:
 
-- The contract runs on portal's Horizon/mux libraries: each procedure is a packet POSTed to its own name, which is exactly what idhn guard manifests match on, so the control API's guard manifest is one action per packet with facts read from the body. mux's WebSocket client carries `logs.stream` and status subscriptions.
+- The contract is plain HTTP with Zod schemas: each procedure is a JSON POST to its own name (`khatm.plan`, `khatm.apply`, ...), which is exactly what idhn guard manifests match on, so the guard manifest is one action per procedure with facts read from the body. Errors come back as `{ error: { code, message, steps?, details? } }` with a fixed code list. Portal's Horizon/mux libraries were the first plan, but `@ritaj/mux` is not published to JSR (it is a workspace member of portal, and depends on unpublished `@ritaj/event` and `@ritaj/storage`), so khatm cannot depend on it. The procedure names and body shapes are what a mux adapter would wrap if portal publishes it later. Streaming (`logs.stream`) is not built; `khatm.events` returns the recent events instead.
 - Workflows such as "plan → confirm destructive steps → apply → wait until healthy" live in the SDK. Shells only supply the confirmation callback, so behavior can't drift.
 - Because `core` runs client-side, the CLI and UI validate and preview plans before any round trip.
 - The web UI generates config forms from the plugin option schemas, so a new registry entry yields validation and a form at once.
@@ -438,7 +438,7 @@ Because the auth server is an IdP, it owns the login pages (users are redirected
 | --- | --- |
 | Better Auth version and first registry | 1.7, at least 1.7.3. The registry ships portal's plugins: email and password, username, admin |
 | Databases at launch | Every dialect `getMigrations()` supports: Postgres, MySQL, SQLite and MSSQL. Portal's Postgres is the reference; each dialect's Deno driver is checked when its registry entry is built |
-| Control API transport | Horizon/mux (see Shared code architecture) |
+| Control API transport | JSON over HTTP, one POST per procedure, Zod schemas in `core/contract`; a Horizon/mux adapter can come once `@ritaj/mux` is published |
 | Programmatic migrations | `getMigrations()` from `better-auth/db/migration`: dry run in `plan`, run in `apply` |
 | Contract steps (dropping orphaned tables) | Never run by khatm in v1. `plan` lists them and the bundle carries their SQL for the operator |
 | Hosted pages and console framework | React with shadcn/ui and Tailwind, themed through CSS variables. The console's UI follows Better Auth Console (see Console deployment) |
@@ -457,7 +457,7 @@ Working backwards from a demo where `apply` swaps a running instance:
 
 1. (done) `core/spec` and `core/registry`: AuthSpec schema for portal's plugin set (email and password, username, admin) plus `Application` and `SessionContract`, canonical serialization, `plan()` with impact classification.
 2. (done, `feat/orchestrator`) Orchestrator: supervisor, child worker built from a resolved manifest, reverse proxy, health checks, blue/green swap, revision storage, apply lock. Built and tested end to end on SQLite and Postgres. MySQL and MSSQL are declared in the spec, but `openDatabase` refuses them until their Deno drivers are chosen; the SQL stores also cover only SQLite and Postgres for now.
-3. `core/contract` + `core/client` + minimal CLI (Unix socket first): `plan`, `apply`, `status`, `logs`, `rollback`.
+3. (done, `feat/orchestrator`) `core/contract` + `core/client` + minimal CLI (Unix socket first): `plan`, `apply`, `status`, `history`, `events`, `rollback`. The control port trusts `x-idhn-subject` for the caller, the socket is `socket`. The CLI over HTTP with a bearer token waits for the console step.
 4. Artifact bundle on apply, then `export`/`import` and the `auth.ts` eject file.
 5. Hosted login pages with design tokens and copy overrides.
 6. Console image and the control API's idhn guard manifest: config forms from schemas, branding preview, running behind idhn with several instances.

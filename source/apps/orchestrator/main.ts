@@ -1,5 +1,6 @@
 import { defaultRegistry } from '@khatm/registry'
 import { parseManifest } from '@khatm/spec'
+import { ControlService, serveControl } from './control.ts'
 import { createRuntime, type Runtime } from './runtime.ts'
 
 /**
@@ -53,8 +54,18 @@ async function main(): Promise<void> {
     )
   }
 
+  const service = new ControlService(runtime, runtime.events)
+  const socket = Deno.env.get('KHATM_SOCKET') ?? '/run/khatm/control.sock'
+  await Deno.mkdir(socket.replace(/\/[^/]+$/, ''), { recursive: true })
+  const control = [serveControl(service, { socket })]
+  const controlPort = Deno.env.get('KHATM_CONTROL_PORT')
+  if (controlPort) {
+    control.push(serveControl(service, { port: Number(controlPort) }))
+  }
+
   const server = runtime.proxy.serve({ port, hostname: '0.0.0.0' })
   const shutdown = async () => {
+    await Promise.all(control.map((c) => c.shutdown()))
     await server.shutdown()
     await runtime.close()
     Deno.exit(0)

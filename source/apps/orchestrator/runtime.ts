@@ -13,6 +13,7 @@ import {
   ProcessWorkers,
   ProxyTraffic,
 } from './adapters.ts'
+import { EventLog } from './control.ts'
 import { openSql, type SqlClient } from './sql.ts'
 import {
   installationKey,
@@ -42,6 +43,7 @@ export interface Runtime {
   readonly store: SqlRevisionStore
   readonly proxy: SwitchableProxy
   readonly client: SqlClient
+  readonly events: EventLog
   close(): Promise<void>
 }
 
@@ -50,6 +52,7 @@ export async function createRuntime(config: RuntimeConfig): Promise<Runtime> {
   const client = openSql(config.store)
   await migrateStore(client)
   const proxy = new SwitchableProxy()
+  const events = new EventLog()
   const store = new SqlRevisionStore(client)
   const workers = new ProcessWorkers(config.workerEntry, config.workerEnv)
   const deployment = new Deployment({
@@ -63,13 +66,19 @@ export async function createRuntime(config: RuntimeConfig): Promise<Runtime> {
       config.secrets,
     ),
     artifacts: new FileArtifacts(config.artifactsDirectory),
-    events: { emit: config.onEvent ?? (() => {}) },
+    events: {
+      emit: (event) => {
+        events.emit(event)
+        config.onEvent?.(event)
+      },
+    },
   }, config.deployment)
   return {
     deployment,
     store,
     proxy,
     client,
+    events,
     async close() {
       await deployment.shutdown()
       await client.close()

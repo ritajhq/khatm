@@ -315,6 +315,11 @@
           "jsr:@std/path@1.1.6"
         ]
       },
+      "source/apps/cli": {
+        "dependencies": [
+          "jsr:@std/assert@1.0.14"
+        ]
+      },
       "source/apps/orchestrator": {
         "dependencies": [
           "jsr:@std/assert@1.0.14",
@@ -337,6 +342,18 @@
           "npm:@types/pg@^8.11.10",
           "npm:better-auth@^1.7.3",
           "npm:pg@^8.13.1"
+        ]
+      },
+      "source/core/client": {
+        "dependencies": [
+          "jsr:@std/assert@1.0.14",
+          "npm:zod@^4.1.0"
+        ]
+      },
+      "source/core/contract": {
+        "dependencies": [
+          "jsr:@std/assert@1.0.14",
+          "npm:zod@^4.1.0"
         ]
       },
       "source/core/deployment": {
