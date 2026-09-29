@@ -186,7 +186,7 @@ OAuth/OIDC apps, JWT/JWKS verification and back-channel logout. Portal's service
 
 ## Orchestrator runtime
 
-The container runs the orchestrator as PID 1: supervisor, reverse proxy and control API. It spawns the Better Auth worker as a child process. Two ports face outward: a public auth port, and a control port reachable only on the internal network, where the console instances and the control API's idhn guard call it. A Unix socket, reached via `docker exec`, bypasses the network entirely. The proxy forwards the public `Host` unchanged, so Better Auth 1.7 builds the right base URL and cookies without trusting forwarded headers.
+The container runs the orchestrator as PID 1: supervisor, reverse proxy and control API. It spawns the Better Auth worker as a child process. Two ports face outward: a public auth port, and a control port reachable only on the internal network, where the console instances and the control API's idhn guard call it. A Unix socket, reached via `docker exec`, bypasses the network entirely. The manifest's `baseURL` is static, so Better Auth builds URLs and cookies from it and never from the request's `Host`. The proxy therefore only adds `x-forwarded-host` and `x-forwarded-proto` for logs.
 
 ### Apply flow
 
@@ -196,8 +196,8 @@ The container runs the orchestrator as PID 1: supervisor, reverse proxy and cont
 4. Write the artifact bundle (see Artifacts). Failure here fails the apply.
 5. Run Better Auth's additive migrations while the old worker is still serving (safe by construction, see Migrations).
 6. Spawn the new worker on a fresh internal port and wait until it is healthy (see Health).
-7. Switch the proxy upstream, then drain and stop the old worker.
-8. Record the revision as active, write the audit entry and release the lock. On failure at any step, the old worker keeps serving and the lock is released.
+7. Switch the proxy upstream, then record the revision as active with a compare-and-swap on the previous active revision. If recording fails, switch back and stop the new worker. Only then drain and stop the old worker.
+8. Write the audit entry and release the lock. On failure at any step, the old worker keeps serving and the lock is released.
 
 ### Concurrency
 
@@ -269,7 +269,7 @@ That shapes the whole design:
 
 ### First boot
 
-1. Check the database connection and run the orchestrator's own migrations.
+1. Read the orchestrator's own database from the environment (`KHATM_STORE`: a Postgres URL or a SQLite path, since there is no manifest yet to name it), and run the orchestrator's own migrations. `doctor` later checks that it matches the manifest's database.
 2. With no revisions yet: load the mounted file, or create a default revision (email and password, default branding).
 3. Apply the manifest's `bootstrap` block once: create the users it names and set the roles it gives them. It never runs again, and later edits to it are ignored.
 4. The operator uses the Unix socket until the console and its idhn guard are set up: `docker exec khatm khatm plan` and `apply` work before anyone can sign in.
@@ -287,6 +287,8 @@ khatm is an Ensemble project, so the split follows Ensemble's rule: `core` speak
 | Path | Contents | Used by |
 | --- | --- | --- |
 | `source/core/spec` | Domain types and schemas (Manifest, Revision, AuthSpec, Application, SessionContract, BrandingSpec), `resolve()`, canonical serialization, `plan(current, desired)`. Pure, no I/O. | Everything |
+| `source/core/auth` | Builds `betterAuth()` from a resolved manifest: database opening per dialect, plugin factories, secret resolution and fingerprints, the migration dry run and runner. The registry keeps schemas and derivations only | worker, orchestrator |
+| `source/core/deployment` | The apply flow behind ports (revision store, apply lock, workers, traffic, migrator, secrets, artifacts): plan, blue/green swap, health checks, crash restart, rollback. In-memory fakes for tests | orchestrator |
 | `source/core/registry` | Plugin and capability registries: option schemas, factories, derivation rules, known `manual` steps per version | orchestrator, worker, console |
 | `source/core/contract` | The control API: procedure names with input and output schemas | orchestrator (server), `core/client` |
 | `source/core/client` | SDK: connection (HTTP or Unix socket), sending the caller's session, multi-step workflows | cli, console |
@@ -453,8 +455,8 @@ Because the auth server is an IdP, it owns the login pages (users are redirected
 
 Working backwards from a demo where `apply` swaps a running instance:
 
-1. `core/spec` and `core/registry`: AuthSpec schema for portal's plugin set (email and password, username, admin) plus `Application` and `SessionContract`, canonical serialization, `plan()` with impact classification.
-2. Orchestrator: supervisor, child worker built from a resolved manifest, reverse proxy, health checks, blue/green swap, revision storage, apply lock.
+1. (done) `core/spec` and `core/registry`: AuthSpec schema for portal's plugin set (email and password, username, admin) plus `Application` and `SessionContract`, canonical serialization, `plan()` with impact classification.
+2. (done, `feat/orchestrator`) Orchestrator: supervisor, child worker built from a resolved manifest, reverse proxy, health checks, blue/green swap, revision storage, apply lock. Built and tested end to end on SQLite and Postgres. MySQL and MSSQL are declared in the spec, but `openDatabase` refuses them until their Deno drivers are chosen; the SQL stores also cover only SQLite and Postgres for now.
 3. `core/contract` + `core/client` + minimal CLI (Unix socket first): `plan`, `apply`, `status`, `logs`, `rollback`.
 4. Artifact bundle on apply, then `export`/`import` and the `auth.ts` eject file.
 5. Hosted login pages with design tokens and copy overrides.
