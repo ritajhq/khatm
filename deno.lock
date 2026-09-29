@@ -323,6 +323,11 @@
           "npm:pg@^8.13.1"
         ]
       },
+      "source/core/deployment": {
+        "dependencies": [
+          "jsr:@std/assert@1.0.14"
+        ]
+      },
       "source/core/registry": {
         "dependencies": [
           "jsr:@std/assert@1.0.14",
