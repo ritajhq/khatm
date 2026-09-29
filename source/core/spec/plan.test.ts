@@ -97,13 +97,22 @@ Deno.test('plan: a plugin option change is a restart', async () => {
   )
 })
 
-Deno.test('plan: adding a secret version rotates; dropping one is destructive', async () => {
+Deno.test('plan: adding a newer secret version logs everyone out; an older one does not', async () => {
   const one = [{ version: 1, value: { env: 'AUTH_SECRET' } }]
   const two = [...one, { version: 2, value: { env: 'AUTH_SECRET_2' } }]
   assertEquals(
     await stepsBetween({ auth: { secrets: one } }, { auth: { secrets: two } }),
     [
-      { path: 'auth.secrets[2]', impact: 'restart' },
+      { path: 'auth.secrets[2]', impact: 'destructive' },
+    ],
+  )
+  assertEquals(
+    await stepsBetween(
+      { auth: { secrets: [two[1]] } },
+      { auth: { secrets: two } },
+    ),
+    [
+      { path: 'auth.secrets[1]', impact: 'restart' },
     ],
   )
   assertEquals(

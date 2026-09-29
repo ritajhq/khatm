@@ -69,7 +69,7 @@ type Revision = {
 
 type AuthSpec = {
   baseURL: string;
-  secrets: VersionedSecret[]; // Better Auth `secrets`; newest version signs, older ones still verify
+  secrets: VersionedSecret[]; // Better Auth `secrets`; newest version signs and verifies session cookies, older ones only decrypt
   database: DatabaseSpec;
   emailAndPassword?: { enabled: boolean; requireVerification?: boolean };
   socialProviders: Record<ProviderId, { clientId: SecretRef; clientSecret: SecretRef }>;
@@ -224,12 +224,12 @@ The same checks, run against the live worker, back `status` and the container's 
 | Impact | Examples | Handling |
 | --- | --- | --- |
 | hot | Branding, copy | No process change |
-| restart | New social provider, rate limits, new secret version added | Blue/green swap |
+| restart | New social provider, rate limits, an older secret version added (decryption only) | Blue/green swap |
 | migration | Plugin added (organization, 2FA) | Additive migrate, then swap |
 | manual | Better Auth upgrade with a data step, a renamed field or table, a required column with no default on a populated table | Apply refused until the operator runs the documented step and re-plans |
-| destructive | Plugin removed (its tables stay but go unused), last secret version removed, secret value changed behind the same ref (both log everyone out) | Explicit confirmation |
+| destructive | Plugin removed (its tables stay but go unused), a new newest secret version (it signs session cookies from then on), any secret version removed, secret value changed behind the same ref (all log everyone out) | Explicit confirmation |
 
-Sessions live in the database, so a normal restart logs nobody out. Rotating the secret is a `restart`, not a `destructive` change, as long as it's done by adding a version: Better Auth's versioned `secrets` (or `BETTER_AUTH_SECRETS`) sign with the newest version and still verify older ones, and lazily re-encrypt on write. Dropping the old version later is the step that invalidates what it signed.
+Sessions live in the database, so a normal restart logs nobody out. Rotating the secret logs everyone out: Better Auth signs and verifies the session cookie with the newest `secrets` version only (verified against 1.7.6, `ctx.context.secret = secrets[0]`); older versions are used only to decrypt data that other features encrypted. So rotation is `destructive` and needs confirmation. Adding a version that is not the newest is a `restart`.
 
 ### Migrations
 

@@ -92,7 +92,7 @@ export async function plan(
 
   const steps: PlanStep[] = changes.map((change) => ({
     ...change,
-    ...classify(change),
+    ...classify(change, newestVersion(current)),
     ...derivedFrom(change, current, desired),
   }))
 
@@ -225,7 +225,14 @@ function derivedFrom(
   return entry ? { derivedFrom: entry.derivedFrom } : {}
 }
 
-function classify(change: Change): { impact: ChangeImpact; reason: string } {
+function newestVersion(resolved: ResolvedManifest | undefined): number {
+  return Math.max(0, ...(resolved?.auth.secrets ?? []).map((s) => s.version))
+}
+
+function classify(
+  change: Change,
+  newest: number,
+): { impact: ChangeImpact; reason: string } {
   const { path, before, after } = change
   const added = before === undefined
   const removed = after === undefined
@@ -241,11 +248,17 @@ function classify(change: Change): { impact: ChangeImpact; reason: string } {
           'Removing a secret version invalidates what it signed, logging those sessions out',
       }
       : added
-      ? {
-        impact: 'restart',
-        reason:
-          'The new version signs from now on; older versions still verify',
-      }
+      ? Number(/\[([^\]]+)\]/.exec(path)![1]) > newest && newest > 0
+        ? {
+          impact: 'destructive',
+          reason:
+            'The new version signs session cookies from now on and Better Auth verifies cookies with the current version only, so everyone is logged out (encrypted data stays readable)',
+        }
+        : {
+          impact: 'restart',
+          reason:
+            'A version that is not the newest is only used to decrypt older data',
+        }
       : changedSecret()
   }
   if (path.startsWith('auth.secrets[')) return changedSecret()

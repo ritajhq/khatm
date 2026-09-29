@@ -1,6 +1,7 @@
 import { assertEquals, assertMatch, assertThrows } from '@std/assert'
 import { authored, manifest } from './test-fixtures.ts'
 import { InvalidManifestError, parseManifest } from './manifest.ts'
+import { secretRefs } from './secret.ts'
 
 function problemsOf(input: unknown): string[] {
   return assertThrows(() => parseManifest(input), InvalidManifestError)
@@ -125,4 +126,23 @@ Deno.test('parseManifest: secret versions are unique and there is at least one',
 Deno.test('parseManifest: rejects unknown fields instead of ignoring them', () => {
   const problems = problemsOf(authored({ auth: { trustedOrigins: [] } }))
   assertMatch(problems[0], /trustedOrigins/)
+})
+
+Deno.test('secretRefs: lists signing secrets, database and provider credentials', () => {
+  const parsed = manifest({
+    auth: {
+      socialProviders: {
+        github: {
+          clientId: { env: 'GH_ID' },
+          clientSecret: { env: 'GH_SECRET' },
+        },
+      },
+    },
+  })
+  assertEquals(secretRefs(parsed.auth), [
+    { env: 'AUTH_SECRET' },
+    { env: 'DATABASE_URL' },
+    { env: 'GH_ID' },
+    { env: 'GH_SECRET' },
+  ])
 })

@@ -36,5 +36,11 @@ export {
   type ResolvedManifest,
 } from './resolve.ts'
 export { InvalidRevisionError, Revision } from './revision.ts'
-export { SecretRef, secretRefKey, Secrets, VersionedSecret } from './secret.ts'
+export {
+  SecretRef,
+  secretRefKey,
+  secretRefs,
+  Secrets,
+  VersionedSecret,
+} from './secret.ts'
 export { SessionContract } from './session-contract.ts'

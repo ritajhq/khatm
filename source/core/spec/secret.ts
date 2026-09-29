@@ -40,3 +40,27 @@ export const Secrets = z.array(VersionedSecret).min(1).superRefine(
     }
   },
 )
+
+/**
+ * Every secret reference an auth spec holds, in a stable order: the signing
+ * secrets, the database URL and each social provider's credentials.
+ */
+export function secretRefs(auth: {
+  secrets: readonly VersionedSecret[]
+  database: { url: SecretRef }
+  socialProviders: Readonly<
+    Record<string, { clientId: SecretRef; clientSecret: SecretRef }>
+  >
+}): SecretRef[] {
+  const refs = [
+    ...auth.secrets.map((secret) => secret.value),
+    auth.database.url,
+  ]
+  for (const id of Object.keys(auth.socialProviders).sort()) {
+    refs.push(
+      auth.socialProviders[id].clientId,
+      auth.socialProviders[id].clientSecret,
+    )
+  }
+  return refs
+}

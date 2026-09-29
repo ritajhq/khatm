@@ -1,0 +1,17 @@
+{
+  "name": "@khatm-libs/supervisor",
+  "exports": "./index.ts",
+  "imports": {
+    "@std/assert": "jsr:@std/assert@1.0.14"
+  },
+  "fmt": {
+    "semiColons": false,
+    "singleQuote": true,
+    "trailingCommas": "onlyMultiLine"
+  },
+  "lint": {
+    "rules": {
+      "exclude": ["no-slow-types"]
+    }
+  }
+}
