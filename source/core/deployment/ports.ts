@@ -48,6 +48,8 @@ export interface Worker {
   readonly id: string
   /** `http://127.0.0.1:PORT` */
   readonly upstream: string
+  /** The internal admin surface, never proxied, and the token it takes. */
+  readonly admin?: { readonly url: string; readonly token: string }
   readonly alive: boolean
   /** Resolves when the process ends, whatever the reason. */
   readonly exited: Promise<void>

@@ -8,8 +8,18 @@ import { Overview } from './screens/overview.tsx'
 import { Revisions } from './screens/revisions.tsx'
 import { Configuration } from './screens/configuration.tsx'
 import { Branding } from './screens/branding.tsx'
+import { Users } from './screens/users.tsx'
+import { Audit } from './screens/audit.tsx'
 
-const TABS = ['overview', 'revisions', 'configuration', 'branding'] as const
+/** How auth is configured, then who uses it: two planes, kept apart. */
+const CONTROL_TABS = [
+  'overview',
+  'revisions',
+  'configuration',
+  'branding',
+] as const
+const DATA_TABS = ['users', 'audit'] as const
+const TABS = [...CONTROL_TABS, ...DATA_TABS]
 type Tab = typeof TABS[number]
 
 /** Where a fresh install's draft starts: the smallest manifest that resolves. */
@@ -67,17 +77,26 @@ function App() {
       <header className='border-b bg-background'>
         <nav className='mx-auto flex max-w-6xl items-center gap-2 px-6 py-3'>
           <span className='mr-4 font-semibold'>khatm</span>
-          {TABS.map((t) => (
-            <a
-              key={t}
-              href={`#/${t}`}
-              className={cn(
-                'rounded-md px-3 py-1.5 text-sm capitalize',
-                t === tab ? 'bg-muted font-medium' : 'text-muted-foreground',
-              )}
+          {[CONTROL_TABS, DATA_TABS].map((group, i) => (
+            <div
+              key={i}
+              className={cn('flex gap-1', i > 0 && 'border-l pl-3')}
             >
-              {t}
-            </a>
+              {group.map((t) => (
+                <a
+                  key={t}
+                  href={`#/${t}`}
+                  className={cn(
+                    'rounded-md px-3 py-1.5 text-sm capitalize',
+                    t === tab
+                      ? 'bg-muted font-medium'
+                      : 'text-muted-foreground',
+                  )}
+                >
+                  {t}
+                </a>
+              ))}
+            </div>
           ))}
           <Button
             size='sm'
@@ -95,6 +114,8 @@ function App() {
         {tab === 'revisions' && (
           <Revisions refresh={refresh} onChanged={changed} />
         )}
+        {tab === 'users' && <Users refresh={refresh} />}
+        {tab === 'audit' && <Audit refresh={refresh} />}
         {editing && text !== undefined && checked && (
           <>
             {tab === 'configuration'

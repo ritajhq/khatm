@@ -61,7 +61,7 @@ function guard(upstream: string, sessionUrl: string) {
 
 Deno.test({
   name:
-    'console: two instances behind a guard plan, apply, roll back and preview branding',
+    'console: two instances behind a guard configure auth and administer users',
   ignore: !available,
   fn: async () => {
     const dir = Deno.makeTempDirSync()
@@ -211,6 +211,65 @@ Deno.test({
         })
       }
       assertEquals((await runtime.store.history()).length, 3)
+
+      // The data plane: Bob signs up, an operator finds him, gives him a role and bans him.
+      const bob = await fetch(`${auth}/api/auth/sign-up/email`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: auth },
+        body: JSON.stringify({
+          email: 'bob@example.com',
+          password: 'bobs-long-enough-password',
+          name: 'Bob',
+        }),
+      })
+      assertEquals(bob.status, 200)
+      await bob.body?.cancel()
+      const bobCookie = bob.headers.getSetCookie()
+        .map((c) => c.split(';')[0]).join('; ')
+      const bobSession = async () =>
+        (await (await fetch(`${auth}/api/auth/get-session`, {
+          headers: { cookie: bobCookie },
+        })).json())?.user?.email
+
+      await other.goto(`${consoles[1]}/#/users`)
+      await other.getByLabel('Search by email').fill('bob')
+      await other.getByRole('button', { name: 'Search' }).click()
+      await other.getByRole('cell', { name: /bob@example.com/ }).click()
+      const panel = other.getByLabel('User bob@example.com')
+      await panel.getByLabel('Role').fill('editor')
+      await panel.getByRole('button', { name: 'Set role' }).click()
+      await panel.getByText('Role set to editor').waitFor()
+      assertEquals(await bobSession(), 'bob@example.com')
+      await panel.getByLabel('Ban reason').fill('spam')
+      await panel.getByRole('button', { name: 'Ban', exact: true }).click()
+      await panel.getByText('Banned and signed out').waitFor()
+      assertEquals(await bobSession(), undefined)
+      if (shots) {
+        await other.screenshot({
+          path: `${shots}/console-users.png`,
+          fullPage: true,
+        })
+      }
+
+      // The audit log names the operator, not khatm's service user.
+      await other.goto(`${consoles[1]}/#/audit`)
+      await other.getByRole('cell', { name: 'users.ban' }).waitFor()
+      const ada = (await sessionUser(page, auth)).id
+      const entries = await runtime.audit.list({ limit: 10 })
+      assertEquals(
+        entries.slice(0, 3).map((e) => [e.actor, e.action]),
+        [
+          [ada, 'users.ban'],
+          [ada, 'users.setRole'],
+          [ada, 'khatm.rollback'],
+        ],
+      )
+      if (shots) {
+        await other.screenshot({
+          path: `${shots}/console-audit.png`,
+          fullPage: true,
+        })
+      }
 
       assertEquals(problems, [])
       await context.close()

@@ -1,4 +1,5 @@
-import { createAuth } from '@khatm/auth'
+import { Administration, createAuth } from '@khatm/auth'
+import { createAdminHandler } from './admin.ts'
 import type { ResolvedManifest } from '@khatm/spec'
 import { pageConfig } from '@khatm/pages'
 import { createHandler } from './handler.ts'
@@ -6,7 +7,7 @@ import { loadPages } from './pages.ts'
 
 /**
  * One Better Auth worker. The orchestrator writes the resolved manifest to
- * stdin and picks the port; secrets come from this process's environment,
+ * stdin and picks the ports; secrets come from this process's environment,
  * so their values never pass through the orchestrator's pipes.
  */
 async function main(): Promise<void> {
@@ -18,6 +19,8 @@ async function main(): Promise<void> {
   }
 
   const { auth, close } = createAuth(resolved)
+  const administration = new Administration(auth)
+  await administration.ensureServiceUser()
   const origins = (resolved.derived['trustedOrigins']?.value as
     | string[]
     | undefined) ?? []
@@ -38,7 +41,19 @@ async function main(): Promise<void> {
     createHandler(auth, { origins }, pages),
   )
 
+  // The internal admin surface, on its own loopback port the proxy never
+  // forwards to. Without a token from the orchestrator there is none.
+  const adminPort = Number(Deno.env.get('ADMIN_PORT'))
+  const adminToken = Deno.env.get('KHATM_ADMIN_TOKEN')
+  const adminServer = adminToken && Number.isInteger(adminPort) && adminPort > 0
+    ? Deno.serve(
+      { port: adminPort, hostname: '127.0.0.1', onListen: () => {} },
+      createAdminHandler(administration, adminToken),
+    )
+    : undefined
+
   const shutdown = async () => {
+    await adminServer?.shutdown()
     await server.shutdown()
     await close()
     Deno.exit(0)

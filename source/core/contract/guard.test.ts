@@ -65,3 +65,19 @@ Deno.test('ship/guard: the shipped example manifests are what the generator make
     toYaml(consoleGuardManifest(resolved)),
   )
 })
+
+Deno.test('controlGuardManifest: every fact is an input field, and no password is one', () => {
+  for (const action of controlGuardManifest(resolved).actions) {
+    const procedure = Object.values(procedures).find((p) =>
+      p.name === action.name
+    )!
+    const fields = Object.keys(
+      (procedure.input as unknown as { shape: object }).shape,
+    )
+    for (const fact of action.extract ?? []) {
+      const field = fact.from.using
+      assertEquals(fields.includes(field), true, `${action.name}: ${field}`)
+      assertEquals(field === 'password', false)
+    }
+  }
+})

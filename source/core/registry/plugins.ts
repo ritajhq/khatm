@@ -24,9 +24,9 @@ export const username: PluginDefinition = {
 }
 
 /**
- * Better Auth's `admin` plugin. khatm derives it whenever the session
- * contract exposes `role`, since that column comes from it. Authorization
- * stays with idhn: nothing in khatm checks the role.
+ * Better Auth's `admin` plugin. khatm always derives it, since identity
+ * administration runs through it, and it adds the `role` column.
+ * Authorization stays with idhn: nothing in khatm checks the role.
  */
 export const admin: PluginDefinition = {
   kind: 'admin',

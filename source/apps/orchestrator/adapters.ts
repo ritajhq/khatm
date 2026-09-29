@@ -59,9 +59,11 @@ export class ProxyTraffic implements Traffic {
   }
 }
 
-/** Runs each worker as a child `deno run` of the worker app, on its own port. */
+/** Runs each worker as a child `deno run` of the worker app, on its own ports. */
 export class ProcessWorkers implements Workers {
   private count = 0
+  /** Lets the orchestrator, and nothing else on the host, call the workers' admin surface. */
+  private readonly adminToken = crypto.randomUUID() + crypto.randomUUID()
 
   constructor(
     private readonly workerEntry: string,
@@ -71,11 +73,17 @@ export class ProcessWorkers implements Workers {
 
   start(resolved: ResolvedManifest): Promise<Worker> {
     const port = freePort()
+    const adminPort = freePort()
     const id = `worker-${++this.count}`
     const process = ManagedProcess.start({
       command: Deno.execPath(),
       args: ['run', '-A', '--no-prompt', this.workerEntry],
-      env: { ...this.env, PORT: String(port) },
+      env: {
+        ...this.env,
+        PORT: String(port),
+        ADMIN_PORT: String(adminPort),
+        KHATM_ADMIN_TOKEN: this.adminToken,
+      },
       stdin: JSON.stringify(resolved),
       label: id,
     })
@@ -83,6 +91,7 @@ export class ProcessWorkers implements Workers {
     return Promise.resolve({
       id,
       upstream: `http://127.0.0.1:${port}`,
+      admin: { url: `http://127.0.0.1:${adminPort}`, token: this.adminToken },
       get alive() {
         return process.alive
       },

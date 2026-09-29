@@ -3,6 +3,7 @@ import { defaultRegistry } from '@khatm/registry'
 import { parseManifest, type ResolvedManifest } from '@khatm/spec'
 import { UnhealthyWorkerError, type Workers } from '@khatm/deployment'
 import { freePort, ManagedProcess } from '@khatm-libs/supervisor'
+import { ControlService } from './control.ts'
 import { createRuntime } from './runtime.ts'
 import { openSql } from './sql.ts'
 
@@ -14,7 +15,19 @@ function manifest(
   database: Record<string, unknown>,
   applications: string[],
 ): ResolvedManifest {
-  return defaultRegistry().resolve(parseManifest({
+  return defaultRegistry().resolve(
+    parseManifest(authored(database, applications)),
+  )
+}
+
+function authored(
+  database: Record<string, unknown>,
+  applications: string[],
+) {
+  return {
+    bootstrap: {
+      users: [{ email: 'root@example.com', name: 'Root', role: 'admin' }],
+    },
     auth: {
       baseURL: ORIGIN,
       secrets: [{ version: 1, value: { env: 'AUTH_SECRET' } }],
@@ -31,7 +44,7 @@ function manifest(
         claims: ['email', 'name'],
       },
     },
-  }))
+  }
 }
 
 /** A worker that dies at once, standing in for a manifest that breaks Better Auth. */
@@ -94,10 +107,21 @@ async function scenario(
   try {
     // Revision 1: nothing exists yet, Better Auth's tables are created.
     const first = await runtime.deployment.apply(
-      await runtime.deployment.plan(manifest(database, ['dashboard'])),
+      await runtime.deployment.plan(
+        manifest(database, ['dashboard']),
+        authored(database, ['dashboard']),
+      ),
       admin,
     )
     assert(first.changed)
+    await runtime.bootstrap.run()
+    const control = new ControlService(runtime, runtime.events)
+    const call = async (name: string, body: unknown) => {
+      const result = await control.handle(name, body, admin)
+      assertEquals(result.status, 200, JSON.stringify(result.body))
+      // deno-lint-ignore no-explicit-any
+      return result.body as any
+    }
 
     const signUp = await fetch(url('/api/auth/sign-up/email'), {
       method: 'POST',
@@ -110,15 +134,49 @@ async function scenario(
     })
     assertEquals(signUp.status, 200, await signUp.clone().text())
     await signUp.body?.cancel()
-    const cookie = signUp.headers.getSetCookie()
+    let session = signUp.headers.getSetCookie()
       .map((c) => c.split(';')[0]).join('; ')
     const sessionEmail = async () => {
       const response = await fetch(url('/api/auth/get-session'), {
-        headers: { cookie },
+        headers: { cookie: session },
       })
       return (await response.json())?.user?.email
     }
     assertEquals(await sessionEmail(), 'ada@example.com')
+
+    // Identity administration runs through the serving worker's Better Auth.
+    const listed = await call('users.list', {})
+    assertEquals(
+      (listed.users as { email: string; role: string }[])
+        .map((u) => [u.email, u.role]),
+      [['ada@example.com', 'user'], ['root@example.com', 'admin']],
+    )
+    await call('users.ban', { user: 'ada@example.com', reason: 'spam' })
+    assertEquals(await sessionEmail(), undefined, 'a ban signs the user out')
+    const signIn = await fetch(url('/api/auth/sign-in/email'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: ORIGIN },
+      body: JSON.stringify({
+        email: 'ada@example.com',
+        password: 'a-long-enough-password',
+      }),
+    })
+    assertEquals(signIn.status, 403, 'a banned user cannot sign in')
+    await signIn.body?.cancel()
+    await call('users.unban', { user: 'ada@example.com' })
+    const again = await fetch(url('/api/auth/sign-in/email'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: ORIGIN },
+      body: JSON.stringify({
+        email: 'ada@example.com',
+        password: 'a-long-enough-password',
+      }),
+    })
+    assertEquals(again.status, 200)
+    await again.body?.cancel()
+    session = again.headers.getSetCookie()
+      .map((c) => c.split(';')[0]).join('; ')
+    const cookie = session
 
     // Revision 2 swaps workers while requests keep flowing.
     let failures = 0
@@ -159,6 +217,26 @@ async function scenario(
     assert(requests > 10, `only ${requests} requests ran during the swap`)
     assertEquals(failures, 0, 'no request failed during the swap')
     assertEquals(await sessionEmail(), 'ada@example.com', 'session survives')
+
+    // The admin surface moved with the traffic to the new worker.
+    const promoted = await call('users.setRole', {
+      user: 'ada@example.com',
+      role: 'admin',
+    }) as { user: { id: string; role: string } }
+    assertEquals(promoted.user.role, 'admin')
+    const { entries } = await call('audit.list', {}) as {
+      entries: { actor: string; action: string; target?: string }[]
+    }
+    assertEquals(
+      entries.map((e) => [e.actor, e.action]),
+      [
+        ['e2e', 'users.setRole'],
+        ['e2e', 'users.unban'],
+        ['e2e', 'users.ban'],
+        ['khatm', 'users.create'],
+      ],
+    )
+    assertEquals(entries[0].target, promoted.user.id)
 
     // A worker that will not start leaves revision 2 serving.
     const servingBefore = runtime.proxy.upstream

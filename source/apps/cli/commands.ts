@@ -9,6 +9,7 @@ import {
 import { defaultRegistry } from '@khatm/registry'
 import { parseManifest } from '@khatm/spec'
 import type { PlanView, RevisionView } from '@khatm/contract'
+import { IDENTITY_USAGE, runIdentity } from './identity.ts'
 
 export interface Io {
   out(line: string): void
@@ -19,6 +20,8 @@ export interface Io {
   writeFile(path: string, content: string): Promise<void>
   /** Every file under a directory, keyed by its path inside it. */
   readTree(dir: string): Promise<Record<string, string>>
+  /** Everything on standard input, for secrets that shouldn't be arguments. */
+  readStdin(): Promise<string>
 }
 
 export const denoIo: Io = {
@@ -44,6 +47,7 @@ export const denoIo: Io = {
     await walk('')
     return files
   },
+  readStdin: () => new Response(Deno.stdin.readable).text(),
 }
 
 /** Exit codes: 0 done, 1 failed, 2 misuse, 3 needs the operator (confirmation or a manual step). */
@@ -62,7 +66,7 @@ Commands:
   status                     Which revision is serving
   history                    Past revisions, newest first (--limit N)
   events                     Recent deployment events (--limit N)
-
+${IDENTITY_USAGE}
 Options:
   --socket <path>            Control socket (default $KHATM_SOCKET, else /run/khatm/control.sock)
   --reason <text>            Recorded with the revision
@@ -86,6 +90,16 @@ export async function run(
         yes: { type: 'boolean', default: false },
         limit: { type: 'string' },
         out: { type: 'string' },
+        search: { type: 'string' },
+        field: { type: 'string' },
+        offset: { type: 'string' },
+        name: { type: 'string' },
+        role: { type: 'string' },
+        expires: { type: 'string' },
+        session: { type: 'string' },
+        actor: { type: 'string' },
+        target: { type: 'string' },
+        'password-stdin': { type: 'boolean', default: false },
         help: { type: 'boolean', default: false },
       },
     })
@@ -143,6 +157,9 @@ export async function run(
       'status',
       'history',
       'events',
+      'users',
+      'sessions',
+      'audit',
     ].includes(command)
   ) {
     io.err(`Unknown command: ${command}\n\n${USAGE}`)
@@ -155,12 +172,26 @@ export async function run(
     io.err('--limit must be a whole number')
     return 2
   }
+  const offset = parsed.values.offset === undefined
+    ? undefined
+    : Number(parsed.values.offset)
+  if (offset !== undefined && !Number.isInteger(offset)) {
+    io.err('--offset must be a whole number')
+    return 2
+  }
 
   const client = connect(
     parsed.values.socket ?? io.env('KHATM_SOCKET') ?? '/run/khatm/control.sock',
   )
   try {
     const { api } = client
+    const identity = await runIdentity(
+      parsed.positionals,
+      { ...parsed.values, limit, offset },
+      api,
+      io,
+    )
+    if (identity !== undefined) return identity
     switch (command) {
       case 'plan': {
         printPlan(

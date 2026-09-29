@@ -136,7 +136,7 @@ type Deployment = {
 | --- | --- |
 | `trustedOrigins`, CORS origins, login `return_to` allowlist | `applications` |
 | `advanced.crossSubDomainCookies` | `session.cookieDomain` |
-| `admin` plugin, with khatm's service user in `adminUserIds` | Identity Administration being enabled, or any app role in use |
+| `admin` plugin, with khatm's service user in `adminUserIds` | Always: identity administration runs through it, and it adds the `role` column |
 | `oauthProvider` (`@better-auth/oauth-provider`) + `jwt` plugins | any `oauth` application |
 | `bearer` + `deviceAuthorization` plugins (after v1) | the CLI logging in over HTTP (see Authorization) |
 | The console's own first-party `Application` | the console being enabled |
@@ -271,7 +271,7 @@ That shapes the whole design:
 
 1. Read the orchestrator's own database from the environment (`KHATM_STORE`: a Postgres URL or a SQLite path, since there is no manifest yet to name it), and run the orchestrator's own migrations. `doctor` later checks that it matches the manifest's database.
 2. With no revisions yet: load the mounted file, or create a default revision (email and password, default branding).
-3. Apply the manifest's `bootstrap` block once: create the users it names and set the roles it gives them. It never runs again, and later edits to it are ignored.
+3. Apply the manifest's `bootstrap` block once, the first time a live revision has one: create the users it names that don't exist yet and set the roles it gives them. Users it creates have no password, so the operator sets one over the socket (`printf '%s' "$PASSWORD" | docker exec -i khatm khatm users set-password root@example.com`). Each step is idempotent, so a failed run is retried on the next apply or start. After it succeeds it never runs again, and later edits to the block are ignored.
 4. The operator uses the Unix socket until the console and its idhn guard are set up: `docker exec khatm khatm plan` and `apply` work before anyone can sign in.
 
 A `doctor` command checks database reachability, secret resolution, base URL consistency and OAuth redirect URIs.
@@ -291,7 +291,7 @@ khatm is an Ensemble project, so the split follows Ensemble's rule: `core` speak
 | `source/core/deployment` | The apply flow behind ports (revision store, apply lock, workers, traffic, migrator, secrets, artifacts): plan, blue/green swap, health checks, crash restart, rollback. In-memory fakes for tests | orchestrator |
 | `source/core/bundle` | Builds a revision's reproducibility bundle: manifests, lock, required secrets, branding, `plan.md` and the ejected `auth.ts`; verifies a bundle is consistent | orchestrator, cli |
 | `source/core/registry` | Plugin and capability registries: option schemas, factories, derivation rules, known `manual` steps per version | orchestrator, worker, console |
-| `source/core/contract` | The control API: procedure names with input and output schemas (`khatm.plan`, `apply`, `rollback`, `status`, `history`, `events`, `export`, `manifest`) and the error codes. `@khatm/contract/guard` generates the idhn guard manifests from the procedures | orchestrator (server), `core/client`, cli |
+| `source/core/contract` | The control API: procedure names with input and output schemas (`khatm.plan`, `apply`, `rollback`, `status`, `history`, `events`, `export`, `manifest`; `users.*`, `sessions.revoke`, `audit.list`) and the error codes. `@khatm/contract/guard` generates the idhn guard manifests from the procedures | orchestrator (server), `core/client`, cli |
 | `source/core/client` | SDK: connection (HTTP or Unix socket), sending the caller's session headers, typed `client.api.plan(...)` calls | cli, console |
 | `source/libs/supervisor` | Child process lifecycle and a switchable reverse proxy, nothing auth-specific | orchestrator |
 | `source/libs/ui` | shadcn-style React components (button, card, input, table, ...) shared by the login and console apps | login, console |
@@ -396,21 +396,23 @@ The web UI manages two planes: the control plane (how auth is configured) and th
 
 ### Operations
 
-List and search users; view sessions and linked accounts; ban and unban; revoke sessions; reset password or force verification; set a user's app role; manage orgs and memberships when that plugin is enabled.
+List and search users; look users up by id (the directory other services use); view sessions and linked accounts; create users; ban and unban; revoke one session or all; set a password or mark the email verified; set a user's role; remove a user. Managing orgs and memberships waits for that plugin. Password reset by email waits for email delivery.
 
 ### Rules
 
 - **Go through Better Auth, not SQL.** Admin actions call Better Auth's admin endpoints so hooks, validation and plugin cleanup still run. Every one of them except `create-user` requires a session, and the admin plugin checks that session's user against its own roles. So:
-  - First boot creates a **khatm service user** with no credentials, so it can never sign in. The resolved manifest lists it in the admin plugin's `adminUserIds`, which passes every permission check.
-  - The worker exposes a small **internal admin surface** on its internal port, never proxied publicly. For each call it creates a short-lived session for the service user through Better Auth's internal adapter, signs it with the worker's own secret, and calls `auth.api.*` in-process with that cookie.
+  - khatm always derives the admin plugin (`derived[plugins.admin]`, from `khatm.administration`), with the **khatm service user** (`khatm-service`, `service@khatm.invalid`) in its `adminUserIds`, which passes every permission check. Each worker creates the service user at start when it's missing. It has no account, so it can never sign in, it never appears in `users.list` or `users.lookup`, and every procedure refuses to act on it (`protected_user`).
+  - The worker exposes a small **internal admin surface** on a second loopback port (`ADMIN_PORT`) that the proxy never forwards to, and it only answers the orchestrator's random per-process bearer token (`KHATM_ADMIN_TOKEN`). For each call it creates a session for the service user through Better Auth's internal adapter that expires within a minute, signs it with the newest secret the way Better Auth signs cookies, calls `auth.api.*` in-process with that cookie, and deletes the session afterwards.
+  - Reads that the admin plugin has no endpoint for (a user's linked accounts, lookup by email or ids) use the internal adapter directly. Every write goes through an admin endpoint.
+  - Sessions are addressed by id on the control API. Their tokens are credentials, so they never leave the worker.
   - idhn has already authorized the human before the call reaches the orchestrator. The audit entry names the human from `x-idhn-subject`, never the service user.
 - **Config-aware screens.** Panels appear based on the active config (orgs, 2FA status and reset, passkey list). The plugin registry declares which admin panels each plugin adds.
-- **CLI parity.** `users list --search`, `users ban <id>`, `sessions revoke --user <id>`, useful for scripted bulk work.
+- **CLI parity.** `users list --search`, `users ban <user>`, `sessions revoke <user>`, and the rest, where a user is an id or an email. `users set-password` reads the password from stdin so it never lands in shell history. Removing a user needs `--yes` (the procedure's `confirmed`).
 - **No impersonation in v1.** Better Auth records the calling session's user as `impersonatedBy`, and `stop-impersonating` puts that user's session back in the browser. Through the service user, that would hand a person the service user's session. Impersonation needs its own khatm flow, tied to the human's session, and waits until after v1.
 
 ### Audit log
 
-An append-only audit log in the database records both planes: control-plane actions (plan, apply, rollback, import, export, socket use, lock takeover) and data-plane actions (ban, revoke, set role). Each entry says who did what to whom (the idhn subject), and when, and links the revision when there is one. It's separate from artifacts.
+An append-only audit log in the orchestrator's database (`khatm.audit`, or `khatm_audit`) records both planes: control-plane changes (apply, rollback, export, and import, which is an apply) and every data-plane change (create, ban, unban, set role, verify, set password, remove, revoke sessions). Each entry says who did what to whom (the idhn subject, `socket`, or `khatm` for the bootstrap), when, how it ended (`ok` or the error code, so refused attempts show too), and the revision when there is one. Details keep the input minus the manifest and any password. Reads, `plan` included, aren't recorded: the console plans on every edit, and a plan changes nothing. `audit.list` reads it newest first, filtered by actor or target and paged with `before`. It's separate from artifacts.
 
 ## Branding and hosted UI
 
@@ -482,5 +484,11 @@ Working backwards from a demo where `apply` swaps a running instance:
    - A Playwright test runs two console instances behind a stub authn-only guard: anonymous calls get 401, an operator signs up on the hosted login, turns the username plugin on through its form, plans and applies (the revision's author is the user id), then rolls back from the other instance, and the branding preview picks up a token change.
    - Checked by hand with idhn's real standalone guard (`feat/session-bearer`, `ENFORCEMENT=authn-only`) in front of the control port and the console relaying to it: no cookie gets 401, a session reaches the orchestrator, and a spoofed `x-idhn-subject` is replaced by the guard, so the recorded author is the real user id.
    - Not done: the console isn't derived as an `Application`, so operators add it to `applications` themselves for now; no `logs.stream` or live status subscription (the overview reloads events on demand); no message (copy) editor in branding; no data-plane screens, which are step 7.
-7. Identity administration and the audit log.
+7. (done, `feat/orchestrator`) Identity administration and the audit log. What exists:
+   - The contract's data-plane procedures: `users.list`, `users.lookup`, `users.get`, `users.create`, `users.ban`, `users.unban`, `users.setRole`, `users.verifyEmail`, `users.setPassword`, `users.remove`, `sessions.revoke`, plus `audit.list`, with the new errors `unknown_user`, `protected_user` and `rejected` (Better Auth said no, for example a too short password). The control guard manifest gives policies the `user`, the `role` being granted and `confirmed` as facts, never a password.
+   - `core/auth`'s `Administration` runs them through the admin plugin as the service user (see Rules). The worker serves it on its admin port, and the orchestrator relays each call to the serving worker, so the admin surface follows a blue/green swap.
+   - The orchestrator records the audit log and runs the bootstrap block (see First boot and Audit log).
+   - The CLI has `users …`, `sessions revoke` and `audit`. The console has a Users screen (search, paging, a panel with role, ban, verification, password, sign-in methods, sessions and removal) and an Audit screen that shows actors and targets by email, kept apart from the control-plane tabs.
+   - Tests: `Administration` against real Better Auth, the orchestrator end to end on SQLite and Postgres (bootstrap, ban signing the user out and blocking sign-in, the admin surface moving with a swap, the audit trail), and the console browser test driving Users and Audit behind the stub guard. The new guard manifest parses with idhn's loader on `feat/session-bearer`.
+   - Not done: organisations and teams, 2FA and passkey panels (their plugins aren't in the registry), password reset by email, impersonation (see Rules), and panels chosen by the plugin registry, since only the admin plugin's are there yet.
 8. Scoped CSS, slots, headless mode, `doctor`.

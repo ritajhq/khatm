@@ -16,10 +16,12 @@ import {
 import { EventLog } from './control.ts'
 import { Bundles } from './bundles.ts'
 import { openSql, type SqlClient } from './sql.ts'
+import { Bootstrap, WorkerAdmin } from './identity.ts'
 import {
   installationKey,
   migrateStore,
   SqlApplyLock,
+  SqlAuditLog,
   SqlRevisionStore,
 } from './stores.ts'
 
@@ -46,6 +48,11 @@ export interface Runtime {
   readonly client: SqlClient
   readonly events: EventLog
   readonly bundles: Bundles
+  readonly audit: SqlAuditLog
+  /** The serving worker's admin surface, for data-plane procedures. */
+  readonly admin: WorkerAdmin
+  /** Applies the manifest's bootstrap block, unless that already happened. */
+  readonly bootstrap: Bootstrap
   close(): Promise<void>
 }
 
@@ -58,7 +65,8 @@ export async function createRuntime(config: RuntimeConfig): Promise<Runtime> {
   const store = new SqlRevisionStore(client)
   const bundles = new Bundles(store)
   const workers = new ProcessWorkers(config.workerEntry, config.workerEnv)
-  const deployment = new Deployment({
+  const audit = new SqlAuditLog(client)
+  const deployment: Deployment = new Deployment({
     store,
     lock: new SqlApplyLock(client),
     workers: config.wrapWorkers?.(workers) ?? workers,
@@ -73,9 +81,22 @@ export async function createRuntime(config: RuntimeConfig): Promise<Runtime> {
       emit: (event) => {
         events.emit(event)
         config.onEvent?.(event)
+        if (event.type === 'apply.activated') {
+          // Only fires during an apply, long after `bootstrap` below exists.
+          bootstrap.run().catch((error) => {
+            const failed = {
+              type: 'bootstrap.failed',
+              error: error instanceof Error ? error.message : String(error),
+            }
+            events.emit(failed)
+            console.error(JSON.stringify(failed))
+          })
+        }
       },
     },
   }, config.deployment)
+  const admin = new WorkerAdmin(deployment)
+  const bootstrap = new Bootstrap(client, deployment, admin, audit)
   return {
     deployment,
     store,
@@ -83,6 +104,9 @@ export async function createRuntime(config: RuntimeConfig): Promise<Runtime> {
     client,
     events,
     bundles,
+    audit,
+    admin,
+    bootstrap,
     async close() {
       await deployment.shutdown()
       await client.close()

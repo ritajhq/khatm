@@ -12,9 +12,9 @@ export async function applyManifestFile(
   path: string,
   options: { confirmed?: boolean } = {},
 ): Promise<string> {
-  const manifest = parseManifest(JSON.parse(await Deno.readTextFile(path)))
-  const resolved = defaultRegistry().resolve(manifest)
-  const planned = await runtime.deployment.plan(resolved)
+  const authored = JSON.parse(await Deno.readTextFile(path))
+  const resolved = defaultRegistry().resolve(parseManifest(authored))
+  const planned = await runtime.deployment.plan(resolved, authored)
   if (planned.plan.isEmpty && runtime.deployment.activeRevision) {
     return 'manifest already applied'
   }
@@ -44,6 +44,10 @@ async function main(): Promise<void> {
   const revision = await runtime.deployment.boot()
   console.log(
     revision ? `serving revision ${revision.id}` : 'no revision applied yet',
+  )
+  // A bootstrap that failed last time gets another go.
+  await runtime.bootstrap.run().catch((error) =>
+    console.error(`bootstrap failed: ${error.message}`)
   )
   const manifest = Deno.env.get('KHATM_MANIFEST')
   if (manifest) {

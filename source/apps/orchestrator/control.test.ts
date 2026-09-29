@@ -14,7 +14,8 @@ import { SwitchableProxy } from '@khatm-libs/supervisor'
 import { ControlService, EventLog, serveControl } from './control.ts'
 import { Bundles } from './bundles.ts'
 import { openSql } from './sql.ts'
-import { migrateStore, SqlRevisionStore } from './stores.ts'
+import { WorkerAdmin } from './identity.ts'
+import { migrateStore, SqlAuditLog, SqlRevisionStore } from './stores.ts'
 
 function manifest(applications: string[] = ['dashboard']) {
   return {
@@ -68,6 +69,8 @@ async function setup() {
       store,
       proxy: new SwitchableProxy(),
       bundles: new Bundles(store, undefined),
+      audit: new SqlAuditLog(sql),
+      admin: new WorkerAdmin(deployment),
     },
     log,
   )
@@ -229,6 +232,64 @@ Deno.test('control: the TCP port trusts only the guard-supplied subject', async 
     await missing.body?.cancel()
   } finally {
     await server.shutdown()
+    await t.close()
+  }
+})
+
+Deno.test('control: changes are audited with their caller and outcome, reads are not', async () => {
+  const t = await setup()
+  try {
+    const applied = await t.api.apply({
+      manifest: manifest(),
+      reason: 'first',
+    })
+    await t.api.status({})
+    await t.api.history({})
+    await t.api.plan({ manifest: manifest() })
+    await assertRejects(
+      () => t.api.rollback({ revision: 'nope' }),
+      ControlError,
+    )
+    const { entries } = await t.api.audit({})
+    assertEquals(
+      entries.map((e) => [e.actor, e.action, e.outcome]),
+      [
+        ['socket', 'khatm.rollback', 'unknown_revision'],
+        ['socket', 'khatm.apply', 'ok'],
+      ],
+    )
+    assertEquals(entries[1].revision, applied.revision.id)
+    assertEquals(entries[1].details, {
+      confirmed: false,
+      reason: 'first',
+      changed: true,
+      impact: 'restart',
+    })
+    assertEquals(entries[0].target, 'nope')
+  } finally {
+    await t.close()
+  }
+})
+
+Deno.test('control: removing a user needs confirmation, and user calls need a serving worker', async () => {
+  const t = await setup()
+  try {
+    const unconfirmed = await assertRejects(
+      () => t.api.removeUser({ user: 'u-1' }),
+      ControlError,
+    )
+    assertEquals(unconfirmed.code, 'confirmation_required')
+    const noWorker = await assertRejects(
+      () => t.api.listUsers({}),
+      ControlError,
+    )
+    assertEquals(noWorker.code, 'no_active_revision')
+    const { entries } = await t.api.audit({ target: 'u-1' })
+    assertEquals(
+      entries.map((e) => [e.action, e.outcome]),
+      [['users.remove', 'confirmation_required']],
+    )
+  } finally {
     await t.close()
   }
 })

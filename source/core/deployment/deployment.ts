@@ -117,6 +117,16 @@ export class Deployment {
     private readonly options: DeploymentOptions = {},
   ) {}
 
+  /** What the serving worker was started from. */
+  get activeState(): ActiveState | undefined {
+    return this.serving?.state
+  }
+
+  /** The serving worker's internal admin surface, when it has one. */
+  get admin(): Worker['admin'] {
+    return this.serving?.worker.admin
+  }
+
   get activeRevision(): Revision | undefined {
     return this.serving?.state.revision
   }

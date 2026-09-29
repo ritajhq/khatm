@@ -31,8 +31,8 @@ Deno.test('Registry: resolves portal, deriving what portal wires by hand today',
       derivedFrom: 'auth.session.cookieDomain',
     },
     'plugins.admin': {
-      value: { kind: 'admin', options: {} },
-      derivedFrom: 'auth.session.claims',
+      value: { kind: 'admin', options: { adminUserIds: ['khatm-service'] } },
+      derivedFrom: 'khatm.administration',
     },
   })
 })

@@ -51,7 +51,7 @@ async function withServer(
 
 const ok = (body: unknown) => () => Response.json(body)
 
-function capture(files: Record<string, string> = {}) {
+function capture(files: Record<string, string> = {}, stdin = '') {
   const written: Record<string, string> = {}
   const out: string[] = []
   const err: string[] = []
@@ -76,6 +76,7 @@ function capture(files: Record<string, string> = {}) {
           Object.entries(files).filter(([p]) => p.startsWith(`${dir}/`))
             .map(([p, c]) => [p.slice(dir.length + 1), c]),
         )),
+      readStdin: () => Promise.resolve(stdin),
     },
   }
 }
@@ -255,4 +256,67 @@ Deno.test('cli: guard prints the control manifest without reaching the orchestra
   assertStringIncludes(c.out.join('\n'), 'id: khatm_control')
   assertStringIncludes(c.out.join('\n'), 'path: /khatm.apply')
   assertEquals(await run(['guard', 'elsewhere', 'm.json'], capture().io), 2)
+})
+
+const ada = {
+  id: 'u-1',
+  email: 'ada@example.com',
+  name: 'Ada',
+  emailVerified: true,
+  role: 'admin',
+  banned: false,
+  createdAt: '2026-09-29T00:00:00.000Z',
+  updatedAt: '2026-09-29T00:00:00.000Z',
+}
+
+Deno.test('cli: users commands send the user as given and print the result', async () => {
+  await withServer({
+    'users.setRole': ok({ user: ada }),
+    'users.setPassword': ok({ user: ada }),
+    'users.list': ok({ users: [ada], total: 1 }),
+    'sessions.revoke': ok({ revoked: 2 }),
+  }, async (socket, calls) => {
+    const c = capture({}, 'a-new-password\n')
+    const at = ['--socket', socket]
+    assertEquals(
+      await run(['users', 'set-role', 'ada@example.com', 'admin', ...at], c.io),
+      0,
+    )
+    assertEquals(
+      await run(['users', 'set-password', 'ada@example.com', ...at], c.io),
+      0,
+    )
+    assertEquals(
+      await run(['users', 'list', '--search', 'ada', ...at], c.io),
+      0,
+    )
+    assertEquals(await run(['sessions', 'revoke', 'u-1', ...at], c.io), 0)
+    assertEquals(calls.map((call) => call.body), [
+      { user: 'ada@example.com', role: 'admin' },
+      { user: 'ada@example.com', password: 'a-new-password' },
+      { search: 'ada', field: 'email', limit: 50, offset: 0 },
+      { user: 'u-1' },
+    ])
+    assertStringIncludes(c.out.join('\n'), 'u-1  ada@example.com  Ada  admin')
+    assertStringIncludes(c.out.join('\n'), 'Revoked 2 sessions')
+  })
+})
+
+Deno.test('cli: users remove without --yes is refused by the server and needs the operator', async () => {
+  await withServer({
+    'users.remove': () =>
+      Response.json({
+        error: {
+          code: 'confirmation_required',
+          message: "Removing a user can't be undone",
+        },
+      }, { status: 409 }),
+  }, async (socket, calls) => {
+    const c = capture()
+    assertEquals(
+      await run(['users', 'remove', 'u-1', '--socket', socket], c.io),
+      3,
+    )
+    assertEquals(calls[0].body, { user: 'u-1', confirmed: false })
+  })
 })

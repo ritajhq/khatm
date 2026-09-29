@@ -27,3 +27,12 @@ export {
   tryResolveSecret,
   UnresolvedSecretsError,
 } from './secrets.ts'
+export {
+  type AdminAccount,
+  AdminRejectedError,
+  type AdminSession,
+  Administration,
+  type AdminUser,
+  ProtectedUserError,
+  UnknownUserError,
+} from './administration.ts'

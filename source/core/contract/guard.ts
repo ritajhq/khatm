@@ -10,8 +10,9 @@ interface BodyFact {
 
 /**
  * The facts each procedure hands the judge. Only what a policy could decide
- * on: which revision, whether destruction was confirmed. Whole manifests stay
- * out, they are too large to reason about in a policy.
+ * on: which revision or user, which role, whether destruction was confirmed.
+ * Whole manifests stay out, they are too large to reason about in a policy,
+ * and so do passwords.
  */
 const FACTS: Readonly<Record<string, readonly BodyFact[]>> = {
   'khatm.apply': [
@@ -24,10 +25,48 @@ const FACTS: Readonly<Record<string, readonly BodyFact[]>> = {
   ],
   'khatm.export': [{ field: 'revision', as: 'revision' }],
   'khatm.manifest': [{ field: 'revision', as: 'revision' }],
+  'users.get': [{ field: 'user', as: 'user' }],
+  'users.create': [
+    { field: 'email', as: 'email' },
+    { field: 'role', as: 'role' },
+  ],
+  'users.ban': [{ field: 'user', as: 'user' }],
+  'users.unban': [{ field: 'user', as: 'user' }],
+  // The role, so a policy can let someone grant `user` but not `admin`.
+  'users.setRole': [
+    { field: 'user', as: 'user' },
+    { field: 'role', as: 'role' },
+  ],
+  'users.verifyEmail': [{ field: 'user', as: 'user' }],
+  'users.setPassword': [{ field: 'user', as: 'user' }],
+  'users.remove': [
+    { field: 'user', as: 'user' },
+    { field: 'confirmed', as: 'confirmed' },
+  ],
+  'sessions.revoke': [
+    { field: 'user', as: 'user' },
+    { field: 'session', as: 'session' },
+  ],
+  'audit.list': [
+    { field: 'actor', as: 'actor' },
+    { field: 'target', as: 'target' },
+  ],
 }
 
 /** Fields the caller must send; every other fact is optional. */
-const REQUIRED: ReadonlySet<string> = new Set(['khatm.rollback:revision'])
+const REQUIRED: ReadonlySet<string> = new Set([
+  'khatm.rollback:revision',
+  'users.get:user',
+  'users.create:email',
+  'users.ban:user',
+  'users.unban:user',
+  'users.setRole:user',
+  'users.setRole:role',
+  'users.verifyEmail:user',
+  'users.setPassword:user',
+  'users.remove:user',
+  'sessions.revoke:user',
+])
 
 /** Better Auth's session cookie name: `__Secure-` prefixed when served over https. */
 export function sessionCookieName(baseURL: string): string {

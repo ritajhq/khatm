@@ -2,6 +2,7 @@ import { UnresolvedSecretsError } from '@khatm/auth'
 import {
   type ErrorBody,
   type ErrorCode,
+  identityProcedures,
   type PlanView,
   type Procedure,
   procedures,
@@ -26,7 +27,40 @@ import {
   parseManifest,
   type Revision,
 } from '@khatm/spec'
+import { ControlError } from './errors.ts'
 import type { Runtime } from './runtime.ts'
+
+export { ControlError }
+
+/**
+ * Procedures that change something, or hand configuration out: each call
+ * lands in the audit log with who made it and how it ended. Reads don't.
+ */
+const AUDITED: ReadonlySet<string> = new Set([
+  'khatm.apply',
+  'khatm.rollback',
+  'khatm.export',
+  'users.create',
+  'users.ban',
+  'users.unban',
+  'users.setRole',
+  'users.verifyEmail',
+  'users.setPassword',
+  'users.remove',
+  'sessions.revoke',
+])
+
+/** Input fields the audit log never keeps: too large, or secret. */
+const UNRECORDED: ReadonlySet<string> = new Set([
+  'manifest',
+  'password',
+  'user',
+  'revision',
+])
+
+const IDENTITY: ReadonlySet<string> = new Set(
+  identityProcedures.map((p) => p.name),
+)
 
 /** Who is calling, as the transport could tell: never something the body claims. */
 export interface Caller {
@@ -43,7 +77,9 @@ export class EventLog implements EventSink {
 
   constructor(private readonly capacity = 500) {}
 
-  emit(event: DeploymentEvent): void {
+  emit(
+    event: DeploymentEvent | { type: string; [key: string]: unknown },
+  ): void {
     const { type, ...data } = event
     this.entries.push({ at: new Date().toISOString(), type, data })
     if (this.entries.length > this.capacity) this.entries.shift()
@@ -54,22 +90,12 @@ export class EventLog implements EventSink {
   }
 }
 
-export class ControlError extends Error {
-  constructor(
-    readonly code: ErrorCode,
-    message: string,
-    readonly extra: Partial<ErrorBody['error']> = {},
-  ) {
-    super(message)
-  }
-}
-
 /** The control API's behavior, independent of how it is served. */
 export class ControlService {
   constructor(
     private readonly runtime: Pick<
       Runtime,
-      'deployment' | 'store' | 'proxy' | 'bundles'
+      'deployment' | 'store' | 'proxy' | 'bundles' | 'audit' | 'admin'
     >,
     private readonly log: EventLog,
   ) {}
@@ -94,11 +120,70 @@ export class ControlService {
           ),
         })
       }
-      const output = await this.run(procedure, input.data, caller)
+      if (!AUDITED.has(name)) {
+        return {
+          status: 200,
+          body: await this.run(procedure, input.data, caller),
+        }
+      }
+      let output: unknown
+      try {
+        output = await this.run(procedure, input.data, caller)
+      } catch (error) {
+        const answer = failure(error)
+        await this.record(name, input.data, caller, undefined, answer.body)
+        return answer
+      }
+      await this.record(name, input.data, caller, output, undefined)
       return { status: 200, body: output }
     } catch (error) {
       return failure(error)
     }
+  }
+
+  /** Who did what to whom, and how it ended; never the manifest or a password. */
+  private async record(
+    name: string,
+    input: unknown,
+    caller: Caller,
+    output: unknown,
+    error: ErrorBody | undefined,
+  ): Promise<void> {
+    const i = input as Record<string, unknown>
+    const o = (output ?? {}) as {
+      revision?: { id: string }
+      user?: { id: string }
+      removed?: string
+      changed?: boolean
+      revoked?: number
+      plan?: { impact: string }
+    }
+    const details: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(i)) {
+      if (!UNRECORDED.has(key) && value !== undefined) details[key] = value
+    }
+    // The user as asked for, when that was an email rather than the id recorded.
+    const resolved = o.user?.id ?? o.removed
+    if (typeof i.user === 'string' && resolved && i.user !== resolved) {
+      details.asked = i.user
+    }
+    if (o.changed !== undefined) details.changed = o.changed
+    if (o.plan) details.impact = o.plan.impact
+    if (o.revoked !== undefined) details.revoked = o.revoked
+    if (error) details.error = error.error.message
+    const target = o.user?.id ?? o.removed ??
+      (typeof i.user === 'string' ? i.user : undefined) ??
+      (name === 'khatm.rollback' ? i.revision as string : undefined)
+    const revision = o.revision?.id ??
+      (name === 'khatm.export' ? i.revision as string | undefined : undefined)
+    await this.runtime.audit.record({
+      actor: caller.author,
+      action: name,
+      ...(target === undefined ? {} : { target }),
+      ...(revision === undefined ? {} : { revision }),
+      outcome: error ? error.error.code : 'ok',
+      details,
+    })
   }
 
   private run(
@@ -124,6 +209,21 @@ export class ControlService {
         return this.export(i.revision as string | undefined)
       case 'khatm.events':
         return Promise.resolve({ events: this.log.latest(i.limit as number) })
+      case 'audit.list':
+        return this.runtime.audit.list(i as never).then((entries) => ({
+          entries,
+        }))
+      case 'users.remove':
+        if (i.confirmed !== true) {
+          throw new ControlError(
+            'confirmation_required',
+            "Removing a user can't be undone: send confirmed to go ahead",
+          )
+        }
+        return this.runtime.admin.call(procedure.name, i)
+    }
+    if (IDENTITY.has(procedure.name)) {
+      return this.runtime.admin.call(procedure.name, input)
     }
     throw new ControlError(
       'unknown_procedure',

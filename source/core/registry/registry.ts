@@ -7,9 +7,9 @@ import {
   type ResolvedManifest,
 } from '@khatm/spec'
 import {
+  fromAdministration,
   fromApplications,
   fromCookieDomain,
-  fromRoleClaim,
 } from './derivations.ts'
 import type { PluginDefinition } from './plugin-definition.ts'
 import { admin, CORE_USER_FIELDS, username } from './plugins.ts'
@@ -119,6 +119,6 @@ export class UnresolvableManifestError extends Error {
 export function defaultRegistry(): Registry {
   return new Registry(
     [username, admin],
-    [fromApplications, fromCookieDomain, fromRoleClaim],
+    [fromApplications, fromCookieDomain, fromAdministration],
   )
 }

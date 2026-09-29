@@ -4,9 +4,11 @@ import { parseManifest, Revision } from '@khatm/spec'
 import { StaleBaseError } from '@khatm/deployment'
 import { openSql, type SqlClient } from './sql.ts'
 import {
+  claimOnce,
   installationKey,
   migrateStore,
   SqlApplyLock,
+  SqlAuditLog,
   SqlRevisionStore,
 } from './stores.ts'
 
@@ -138,5 +140,57 @@ Deno.test('SqlApplyLock: one holder at a time, expired leases are taken over', a
     await takenOver.release()
     await a.close()
     await b.close()
+  })
+})
+
+Deno.test('SqlAuditLog: appends, reads newest first, filters and pages', async () => {
+  await withClients(async (open, name) => {
+    const client = open()
+    await migrateStore(client)
+    const log = new SqlAuditLog(client)
+    await log.record({
+      actor: 'ali',
+      action: 'khatm.apply',
+      revision: 'r-1',
+      outcome: 'ok',
+      details: { reason: 'first' },
+    })
+    await log.record({
+      actor: 'socket',
+      action: 'users.ban',
+      target: 'u-1',
+      outcome: 'ok',
+      details: {},
+    })
+    await log.record({
+      actor: 'ali',
+      action: 'users.setRole',
+      target: 'u-1',
+      outcome: 'unknown_user',
+      details: { role: 'admin' },
+    })
+    const all = await log.list({ limit: 10 })
+    assertEquals(all.map((e) => e.action), [
+      'users.setRole',
+      'users.ban',
+      'khatm.apply',
+    ], name)
+    assertEquals(all[2].details, { reason: 'first' }, name)
+    assertEquals(all[2].revision, 'r-1', name)
+    assertEquals(all[0].outcome, 'unknown_user', name)
+    assertEquals(
+      (await log.list({ limit: 10, actor: 'ali' })).length,
+      2,
+      name,
+    )
+    assertEquals(
+      (await log.list({ limit: 10, target: 'u-1', before: all[0].id }))
+        .map((e) => e.action),
+      ['users.ban'],
+      name,
+    )
+    assertEquals(await claimOnce(client, 'bootstrap'), true, name)
+    assertEquals(await claimOnce(client, 'bootstrap'), false, name)
+    await client.close()
   })
 })

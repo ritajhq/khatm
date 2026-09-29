@@ -44,3 +44,4 @@ export {
   VersionedSecret,
 } from './secret.ts'
 export { SessionContract } from './session-contract.ts'
+export { SERVICE_USER } from './service-user.ts'

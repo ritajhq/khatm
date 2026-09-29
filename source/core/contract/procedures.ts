@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { AuditEntryView, UserDetail, UserRef, UserView } from './identity.ts'
 
 /**
  * The control API: every procedure is a POST of a JSON body to `/<name>`, so
@@ -152,6 +153,114 @@ export const manifest = procedure(
   }),
 )
 
+const Paging = {
+  limit: z.number().int().min(1).max(200).default(50),
+  offset: z.number().int().min(0).default(0),
+}
+
+export const listUsers = procedure(
+  'users.list',
+  z.object({
+    /** Matches users whose `field` contains it. */
+    search: z.string().min(1).optional(),
+    field: z.enum(['email', 'name']).default('email'),
+    ...Paging,
+  }),
+  z.object({ users: z.array(UserView), total: z.number() }),
+)
+
+/** The read-only directory other services use, instead of querying Better Auth's tables. */
+export const lookupUsers = procedure(
+  'users.lookup',
+  z.object({ ids: z.array(z.string().min(1)).min(1).max(100) }),
+  z.object({ users: z.array(UserView) }),
+)
+
+export const getUser = procedure(
+  'users.get',
+  z.object({ user: UserRef }),
+  UserDetail,
+)
+
+export const createUser = procedure(
+  'users.create',
+  z.object({
+    email: z.email(),
+    name: z.string().min(1),
+    /** Left out, the user has no password until one is set or they use a provider. */
+    password: z.string().min(1).optional(),
+    role: z.string().min(1).optional(),
+  }),
+  z.object({ user: UserView }),
+)
+
+export const banUser = procedure(
+  'users.ban',
+  z.object({
+    user: UserRef,
+    reason: z.string().min(1).optional(),
+    /** Left out, the ban lasts until `users.unban`. */
+    expiresInSeconds: z.number().int().positive().optional(),
+  }),
+  z.object({ user: UserView }),
+)
+
+export const unbanUser = procedure(
+  'users.unban',
+  z.object({ user: UserRef }),
+  z.object({ user: UserView }),
+)
+
+export const setRole = procedure(
+  'users.setRole',
+  z.object({ user: UserRef, role: z.string().min(1) }),
+  z.object({ user: UserView }),
+)
+
+export const verifyEmail = procedure(
+  'users.verifyEmail',
+  z.object({ user: UserRef }),
+  z.object({ user: UserView }),
+)
+
+export const setPassword = procedure(
+  'users.setPassword',
+  z.object({ user: UserRef, password: z.string().min(1) }),
+  z.object({ user: UserView }),
+)
+
+export const removeUser = procedure(
+  'users.remove',
+  z.object({
+    user: UserRef,
+    /** Removal can't be undone, so it must be asked for explicitly. */
+    confirmed: z.boolean().default(false),
+  }),
+  z.object({ removed: z.string() }),
+)
+
+export const revokeSessions = procedure(
+  'sessions.revoke',
+  z.object({
+    user: UserRef,
+    /** One session's id; left out, every session of the user. */
+    session: z.string().min(1).optional(),
+  }),
+  z.object({ revoked: z.number() }),
+)
+
+export const audit = procedure(
+  'audit.list',
+  z.object({
+    limit: z.number().int().min(1).max(500).default(100),
+    /** Entries older than this id, for paging back. */
+    before: z.number().int().positive().optional(),
+    actor: z.string().min(1).optional(),
+    target: z.string().min(1).optional(),
+  }),
+  z.object({ entries: z.array(AuditEntryView) }),
+)
+
 export const procedures = {
   plan,
   apply,
@@ -161,8 +270,38 @@ export const procedures = {
   events,
   export: exportBundle,
   manifest,
+  listUsers,
+  lookupUsers,
+  getUser,
+  createUser,
+  banUser,
+  unbanUser,
+  setRole,
+  verifyEmail,
+  setPassword,
+  removeUser,
+  revokeSessions,
+  audit,
 }
 export type Procedures = typeof procedures
+
+/**
+ * The data-plane procedures. The orchestrator hands them to the serving
+ * worker's internal admin surface, which runs them through Better Auth.
+ */
+export const identityProcedures: readonly Procedure[] = [
+  listUsers,
+  lookupUsers,
+  getUser,
+  createUser,
+  banUser,
+  unbanUser,
+  setRole,
+  verifyEmail,
+  setPassword,
+  removeUser,
+  revokeSessions,
+]
 export type ProcedureName = Procedures[keyof Procedures]['name']
 
 export type Input<P extends Procedure> = z.input<P['input']>
@@ -177,6 +316,11 @@ export const ErrorCode = z.enum([
   'unknown_procedure',
   'unknown_revision',
   'no_active_revision',
+  'unknown_user',
+  /** khatm's own service user, which no one may change. */
+  'protected_user',
+  /** Better Auth refused the change, such as a too short password. */
+  'rejected',
   'blocked',
   'confirmation_required',
   'apply_in_progress',
@@ -206,6 +350,9 @@ export const STATUS: Readonly<Record<ErrorCode, number>> = {
   unknown_procedure: 404,
   unknown_revision: 404,
   no_active_revision: 404,
+  unknown_user: 404,
+  protected_user: 403,
+  rejected: 422,
   blocked: 409,
   confirmation_required: 409,
   apply_in_progress: 409,

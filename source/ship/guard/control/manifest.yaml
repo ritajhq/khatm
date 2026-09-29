@@ -83,3 +83,141 @@ actions:
           type: json
         as: revision
         optional: true
+  - name: users.list
+    match:
+      method: POST
+      path: /users.list
+  - name: users.lookup
+    match:
+      method: POST
+      path: /users.lookup
+  - name: users.get
+    match:
+      method: POST
+      path: /users.get
+    extract:
+      - from:
+          property: body
+          using: user
+          type: json
+        as: user
+  - name: users.create
+    match:
+      method: POST
+      path: /users.create
+    extract:
+      - from:
+          property: body
+          using: email
+          type: json
+        as: email
+      - from:
+          property: body
+          using: role
+          type: json
+        as: role
+        optional: true
+  - name: users.ban
+    match:
+      method: POST
+      path: /users.ban
+    extract:
+      - from:
+          property: body
+          using: user
+          type: json
+        as: user
+  - name: users.unban
+    match:
+      method: POST
+      path: /users.unban
+    extract:
+      - from:
+          property: body
+          using: user
+          type: json
+        as: user
+  - name: users.setRole
+    match:
+      method: POST
+      path: /users.setRole
+    extract:
+      - from:
+          property: body
+          using: user
+          type: json
+        as: user
+      - from:
+          property: body
+          using: role
+          type: json
+        as: role
+  - name: users.verifyEmail
+    match:
+      method: POST
+      path: /users.verifyEmail
+    extract:
+      - from:
+          property: body
+          using: user
+          type: json
+        as: user
+  - name: users.setPassword
+    match:
+      method: POST
+      path: /users.setPassword
+    extract:
+      - from:
+          property: body
+          using: user
+          type: json
+        as: user
+  - name: users.remove
+    match:
+      method: POST
+      path: /users.remove
+    extract:
+      - from:
+          property: body
+          using: user
+          type: json
+        as: user
+      - from:
+          property: body
+          using: confirmed
+          type: json
+        as: confirmed
+        optional: true
+  - name: sessions.revoke
+    match:
+      method: POST
+      path: /sessions.revoke
+    extract:
+      - from:
+          property: body
+          using: user
+          type: json
+        as: user
+      - from:
+          property: body
+          using: session
+          type: json
+        as: session
+        optional: true
+  - name: audit.list
+    match:
+      method: POST
+      path: /audit.list
+    extract:
+      - from:
+          property: body
+          using: actor
+          type: json
+        as: actor
+        optional: true
+      - from:
+          property: body
+          using: target
+          type: json
+        as: target
+        optional: true

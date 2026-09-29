@@ -22,6 +22,7 @@ export function tables(client: SqlClient) {
     state: name('state'),
     lock: name('apply_lock'),
     installation: name('installation'),
+    audit: name('audit'),
   }
 }
 
@@ -51,6 +52,17 @@ export async function migrateStore(client: SqlClient): Promise<void> {
        id INTEGER PRIMARY KEY, active_revision TEXT)`,
     `CREATE TABLE IF NOT EXISTS ${t.lock} (
        id INTEGER PRIMARY KEY, owner TEXT NOT NULL, expires_at BIGINT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS ${t.audit} (
+       seq ${
+      client.dialect === 'postgres' ? 'BIGSERIAL' : 'INTEGER'
+    } PRIMARY KEY${client.dialect === 'sqlite' ? ' AUTOINCREMENT' : ''},
+       at TEXT NOT NULL,
+       actor TEXT NOT NULL,
+       action TEXT NOT NULL,
+       target TEXT,
+       revision TEXT,
+       outcome TEXT NOT NULL,
+       details TEXT NOT NULL)`,
   ]
   for (const statement of statements) await client.execute(statement)
   await client.execute(
@@ -71,6 +83,113 @@ export async function installationKey(client: SqlClient): Promise<string> {
     `SELECT value FROM ${t.installation} WHERE name = 'fingerprint_key'`,
   )
   return String(rows[0].value)
+}
+
+/**
+ * Claims a once-per-installation step, such as applying the manifest's
+ * bootstrap block: true for exactly one caller, ever.
+ */
+export async function claimOnce(
+  client: SqlClient,
+  step: string,
+): Promise<boolean> {
+  const t = tables(client)
+  const { changes } = await client.execute(
+    `INSERT INTO ${t.installation} (name, value) VALUES (?, ?)
+     ON CONFLICT (name) DO NOTHING`,
+    [`done:${step}`, new Date().toISOString()],
+  )
+  return changes === 1
+}
+
+/** Whether a once-per-installation step has been claimed. */
+export async function isDone(
+  client: SqlClient,
+  step: string,
+): Promise<boolean> {
+  const t = tables(client)
+  const { rows } = await client.execute(
+    `SELECT name FROM ${t.installation} WHERE name = ?`,
+    [`done:${step}`],
+  )
+  return rows.length > 0
+}
+
+/** One audited action, as recorded. */
+export interface AuditEntry {
+  readonly id: number
+  readonly at: string
+  readonly actor: string
+  readonly action: string
+  readonly target?: string
+  readonly revision?: string
+  readonly outcome: string
+  readonly details: Record<string, unknown>
+}
+
+/** Append-only: entries are added and read, never changed or removed. */
+export class SqlAuditLog {
+  private readonly t: ReturnType<typeof tables>
+
+  constructor(private readonly client: SqlClient) {
+    this.t = tables(client)
+  }
+
+  async record(entry: Omit<AuditEntry, 'id' | 'at'>): Promise<void> {
+    await this.client.execute(
+      `INSERT INTO ${this.t.audit}
+         (at, actor, action, target, revision, outcome, details)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        new Date().toISOString(),
+        entry.actor,
+        entry.action,
+        entry.target ?? null,
+        entry.revision ?? null,
+        entry.outcome,
+        JSON.stringify(entry.details),
+      ],
+    )
+  }
+
+  /** Newest first. */
+  async list(query: {
+    limit: number
+    before?: number
+    actor?: string
+    target?: string
+  }): Promise<AuditEntry[]> {
+    const where: string[] = []
+    const params: (string | number)[] = []
+    if (query.before !== undefined) {
+      where.push('seq < ?')
+      params.push(query.before)
+    }
+    if (query.actor !== undefined) {
+      where.push('actor = ?')
+      params.push(query.actor)
+    }
+    if (query.target !== undefined) {
+      where.push('target = ?')
+      params.push(query.target)
+    }
+    const { rows } = await this.client.execute(
+      `SELECT * FROM ${this.t.audit}
+       ${where.length === 0 ? '' : `WHERE ${where.join(' AND ')}`}
+       ORDER BY seq DESC LIMIT ${Math.trunc(query.limit)}`,
+      params,
+    )
+    return rows.map((row) => ({
+      id: Number(row.seq),
+      at: String(row.at),
+      actor: String(row.actor),
+      action: String(row.action),
+      ...(row.target === null ? {} : { target: String(row.target) }),
+      ...(row.revision === null ? {} : { revision: String(row.revision) }),
+      outcome: String(row.outcome),
+      details: JSON.parse(String(row.details)),
+    }))
+  }
 }
 
 export class SqlRevisionStore implements RevisionStore {

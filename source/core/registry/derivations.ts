@@ -3,6 +3,7 @@ import {
   type Derived,
   landingApplication,
   type Manifest,
+  SERVICE_USER,
 } from '@khatm/spec'
 
 /**
@@ -43,14 +44,20 @@ export const fromCookieDomain: Derivation = {
   },
 }
 
-/** The admin plugin, whenever the session contract exposes the `role` column it adds. */
-export const fromRoleClaim: Derivation = {
-  derive(manifest: Manifest): Record<string, Derived> {
-    if (!manifest.auth.session.claims.includes('role')) return {}
+/**
+ * The admin plugin, always: khatm administers identities through it, as its
+ * service user, and the `role` claim is its column. Nothing in khatm checks a
+ * user's role; idhn policies read it.
+ */
+export const fromAdministration: Derivation = {
+  derive(): Record<string, Derived> {
     return {
       'plugins.admin': {
-        value: { kind: 'admin', options: {} },
-        derivedFrom: 'auth.session.claims',
+        value: {
+          kind: 'admin',
+          options: { adminUserIds: [SERVICE_USER.id] },
+        },
+        derivedFrom: 'khatm.administration',
       },
     }
   },
