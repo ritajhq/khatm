@@ -7,7 +7,18 @@ export {
   OAuthApplication,
 } from './application.ts'
 export { AuthSpec } from './auth-spec.ts'
-export { BrandingSpec, TokenName, TokenValue } from './branding.ts'
+export {
+  BrandingSpec,
+  CssProperty,
+  PART_NAMES,
+  PartName,
+  SLOT_NAMES,
+  SlotHtml,
+  SlotName,
+  TokenName,
+  TokenValue,
+} from './branding.ts'
+export { MAX_SLOT_LENGTH, type SanitizedSlot, sanitizeSlot } from './slot.ts'
 export { canonicalize, sha256 } from './canonical.ts'
 export { DatabaseSpec, Dialect } from './database.ts'
 export type { Json } from './json.ts'

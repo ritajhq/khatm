@@ -320,3 +320,32 @@ Deno.test('cli: users remove without --yes is refused by the server and needs th
     assertEquals(calls[0].body, { user: 'u-1', confirmed: false })
   })
 })
+
+Deno.test('cli: doctor sends guard manifests by file name and fails when a check does', async () => {
+  await withServer({
+    'khatm.doctor': ok({
+      findings: [
+        { check: 'secrets', severity: 'ok', message: 'Every secret resolves' },
+        { check: 'guard:places', severity: 'fail', message: 'cookie differs' },
+      ],
+    }),
+  }, async (socket, calls) => {
+    const c = capture({
+      'guards/places.yaml': 'id: places\nauthentication: []\n',
+    })
+    assertEquals(
+      await run(
+        ['doctor', '--guard', 'guards/places.yaml', '--socket', socket],
+        c.io,
+      ),
+      1,
+    )
+    assertEquals(calls[0].body, {
+      guards: [{
+        name: 'places',
+        manifest: { id: 'places', authentication: [] },
+      }],
+    })
+    assertStringIncludes(c.out.join('\n'), 'FAIL  guard:places')
+  })
+})

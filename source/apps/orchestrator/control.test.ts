@@ -71,6 +71,7 @@ async function setup() {
       bundles: new Bundles(store, undefined),
       audit: new SqlAuditLog(sql),
       admin: new WorkerAdmin(deployment),
+      doctor: () => Promise.resolve([]),
     },
     log,
   )

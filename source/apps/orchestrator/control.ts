@@ -95,7 +95,13 @@ export class ControlService {
   constructor(
     private readonly runtime: Pick<
       Runtime,
-      'deployment' | 'store' | 'proxy' | 'bundles' | 'audit' | 'admin'
+      | 'deployment'
+      | 'store'
+      | 'proxy'
+      | 'bundles'
+      | 'audit'
+      | 'admin'
+      | 'doctor'
     >,
     private readonly log: EventLog,
   ) {}
@@ -209,6 +215,8 @@ export class ControlService {
         return this.export(i.revision as string | undefined)
       case 'khatm.events':
         return Promise.resolve({ events: this.log.latest(i.limit as number) })
+      case 'khatm.doctor':
+        return this.doctor(i as never)
       case 'audit.list':
         return this.runtime.audit.list(i as never).then((entries) => ({
           entries,
@@ -320,6 +328,16 @@ export class ControlService {
         : { authored: state.authored as Record<string, unknown> }),
       resolved: JSON.parse(JSON.stringify(state.resolved)),
     }
+  }
+
+  private async doctor(input: {
+    manifest?: Record<string, unknown>
+    guards: { name: string; manifest: Record<string, unknown> }[]
+  }) {
+    const resolved = input.manifest === undefined
+      ? (await this.state(undefined)).resolved
+      : defaultRegistry().resolve(parseManifest(input.manifest))
+    return { findings: await this.runtime.doctor(resolved, input.guards) }
   }
 
   private async export(revisionId: string | undefined) {

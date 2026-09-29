@@ -22,12 +22,14 @@ export function Notice(
   const code = new URLSearchParams(globalThis.location.search).get('error')
   return (
     <Layout>
-      <Card>
-        <CardHeader>
-          <CardTitle>{t(title)}</CardTitle>
-          <CardDescription>{t(description)}</CardDescription>
+      <Card data-khatm-part='card'>
+        <CardHeader data-khatm-part='header'>
+          <CardTitle data-khatm-part='title'>{t(title)}</CardTitle>
+          <CardDescription data-khatm-part='description'>
+            {t(description)}
+          </CardDescription>
         </CardHeader>
-        <CardContent className='grid gap-4'>
+        <CardContent data-khatm-part='content' className='grid gap-4'>
           {code && (
             <p className='text-center text-xs text-muted-foreground'>{code}</p>
           )}

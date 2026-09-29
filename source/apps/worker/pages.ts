@@ -5,6 +5,9 @@ export interface PagesOptions {
   readonly dist: string
   readonly config: PageConfig
   readonly tokens: Readonly<Record<string, string>>
+  readonly parts?: Readonly<
+    Partial<Record<string, Readonly<Record<string, string>>>>
+  >
 }
 
 const ASSETS: Readonly<Record<string, string>> = {
@@ -34,6 +37,7 @@ export async function loadPages(
     template,
     options.config,
     options.tokens,
+    { parts: options.parts },
   )
 
   return (request) => {

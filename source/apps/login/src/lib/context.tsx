@@ -4,12 +4,16 @@ import {
   type MessageId,
   PageConfig,
   resolveMessages,
+  sanitizedSlots,
 } from '@khatm/pages'
+import type { SlotName } from '@khatm/spec'
 
 interface Page {
   config: PageConfig
   /** The text for a message id, in the visitor's language when the branding has one. */
   t(id: MessageId): string
+  /** A slot's markup in the visitor's language, falling back to English. */
+  slot(name: SlotName): string | undefined
 }
 
 const PageContext = createContext<Page | undefined>(undefined)
@@ -33,7 +37,14 @@ export function PageProvider(
       config.messages,
       chooseLocale(languages, config.messages),
     )
-    return { config, t: (id) => messages[id] }
+    const slots = sanitizedSlots(config.slots)
+    const locale = chooseLocale(languages, slots)
+    const slotsFor = (l: string) => slots[l] ?? slots[l.split('-')[0]]
+    return {
+      config,
+      t: (id) => messages[id],
+      slot: (name) => slotsFor(locale)?.[name] ?? slots.en?.[name],
+    }
   }, [config, languages])
   return <PageContext.Provider value={page}>{children}</PageContext.Provider>
 }

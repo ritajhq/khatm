@@ -143,3 +143,39 @@ Deno.test('themeCss: tokens become custom properties, and bad ones are refused a
     assertEquals(thrown, true, value)
   }
 })
+
+Deno.test('themeCss: parts become :root scoped rules on their data-khatm-part, only for known parts', () => {
+  assertEquals(
+    themeCss({ primary: 'red' }, {
+      card: { 'border-radius': '0', 'box-shadow': 'none' },
+      submit: { 'text-transform': 'uppercase' },
+    }),
+    ':root{--primary:red;}' +
+      ':root [data-khatm-part="card"]{border-radius:0;box-shadow:none;}' +
+      ':root [data-khatm-part="submit"]{text-transform:uppercase;}',
+  )
+  assertEquals(
+    themeCss({}, {
+      body: { color: 'red' },
+      card: { color: 'red;}body{display:none' },
+    }),
+    '',
+  )
+})
+
+Deno.test('pageConfig: carries slots per locale, sanitized again', () => {
+  const config = pageConfig(resolved({}, {
+    slots: {
+      en: { legal: '<p>See <a href="https://example.com/terms">terms</a></p>' },
+      it: { footer: 'Ciao' },
+    },
+  }))
+  assertEquals(config.slots, {
+    en: {
+      legal:
+        '<p>See <a href="https://example.com/terms" rel="noopener noreferrer">terms</a></p>',
+    },
+    it: { footer: 'Ciao' },
+  })
+  assertEquals(pageConfig(resolved()).slots, {})
+})

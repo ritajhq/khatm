@@ -21,9 +21,10 @@ export function SocialButtons(
   },
 ) {
   return (
-    <div className='grid gap-2'>
+    <div data-khatm-part='social' className='grid gap-2'>
       {providers.map((provider) => (
         <Button
+          data-khatm-part='provider'
           key={provider}
           type='button'
           variant='outline'

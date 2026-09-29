@@ -35,7 +35,7 @@ Deno.test({
       AUTH_SECRET: 'browser-test-secret-with-plenty-of-entropy-01',
       DATABASE: `${dir}/auth.db`,
     }
-    const resolved = defaultRegistry().resolve(parseManifest({
+    const authored = (branding: Record<string, unknown>) => ({
       auth: {
         baseURL: origin,
         secrets: [{ version: 1, value: { env: 'AUTH_SECRET' } }],
@@ -57,14 +57,29 @@ Deno.test({
           claims: ['email', 'username'],
         },
       },
-      branding: {
-        name: 'Acme',
-        tokens: { primary: 'rgb(200, 0, 100)' },
-        messages: {
-          it: { 'signIn.title': 'Accedi', 'signIn.submit': 'Entra' },
-        },
+      branding,
+    })
+    const branding = {
+      name: 'Acme',
+      tokens: { primary: 'rgb(200, 0, 100)' },
+      messages: {
+        it: { 'signIn.title': 'Accedi', 'signIn.submit': 'Entra' },
       },
-    }))
+      parts: {
+        card: { 'border-radius': '0px' },
+        submit: { 'text-transform': 'uppercase' },
+      },
+      slots: {
+        en: {
+          legal:
+            '<p>By signing in you accept the <a href="https://example.com/terms">terms</a>.</p>',
+        },
+        it: { legal: '<p>Accedendo accetti i termini.</p>' },
+      },
+    }
+    const resolved = defaultRegistry().resolve(
+      parseManifest(authored(branding)),
+    )
     const runtime = await createRuntime({
       store: `${dir}/orchestrator.db`,
       artifactsDirectory: `${dir}/artifacts`,
@@ -127,6 +142,17 @@ Deno.test({
         ),
         'rgb(200, 0, 100)',
       )
+      // Scoped CSS reaches its part, and the legal slot shows sanitized markup.
+      assertEquals(
+        await second.evaluate(
+          `getComputedStyle(document.querySelector('[data-khatm-part="card"]')).borderTopLeftRadius`,
+        ),
+        '0px',
+      )
+      assertEquals(
+        await second.getByRole('link', { name: 'terms' }).getAttribute('rel'),
+        'noopener noreferrer',
+      )
       if (shots) await second.screenshot({ path: `${shots}/sign-in.png` })
       await second.getByLabel('Email or username').fill('ada')
       await second.getByLabel('Password', { exact: true }).fill(
@@ -153,7 +179,24 @@ Deno.test({
       await it.goto(`${origin}/login`)
       assertEquals(await it.locator('h1').textContent(), 'Accedi')
       await it.getByRole('button', { name: 'Entra' }).waitFor()
+      await it.getByText('Accedendo accetti i termini.').waitFor()
       await italian.close()
+
+      // Headless: the API stays, the pages go.
+      await runtime.deployment.apply(
+        await runtime.deployment.plan(
+          defaultRegistry().resolve(
+            parseManifest(authored({ ...branding, pages: 'headless' })),
+          ),
+        ),
+        { author: 'browser-test' },
+      )
+      const gone = await fetch(`${origin}/login`)
+      assertEquals(gone.status, 404)
+      await gone.body?.cancel()
+      const ok = await fetch(`${origin}/api/auth/ok`)
+      assertEquals(ok.status, 200)
+      await ok.body?.cancel()
 
       assertEquals(problems, [])
       await context.close()

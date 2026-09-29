@@ -36,9 +36,14 @@ export async function renderPage(
   template: string,
   config: PageConfig,
   tokens: Readonly<Record<string, string>>,
-  options: { assetBase?: string; frameAncestors?: string } = {},
+  options: {
+    assetBase?: string
+    frameAncestors?: string
+    /** Scoped CSS per stable part, from the branding. */
+    parts?: Readonly<Partial<Record<string, Readonly<Record<string, string>>>>>
+  } = {},
 ): Promise<RenderedPage> {
-  const css = themeCss(tokens)
+  const css = themeCss(tokens, options.parts)
   // The config is JSON in a non-executing script tag; `<` is escaped so no
   // value in it can close the tag.
   const configJson = JSON.stringify(config).replaceAll('<', '\\u003c')
@@ -52,7 +57,7 @@ export async function renderPage(
   const csp = [
     "default-src 'self'",
     "script-src 'self'",
-    // Only the theme rule above is inline, allowed by its hash.
+    // Only the theme stylesheet above is inline, allowed by its hash.
     css === ''
       ? "style-src 'self'"
       : `style-src 'self' 'sha256-${await sha256Base64(css)}'`,

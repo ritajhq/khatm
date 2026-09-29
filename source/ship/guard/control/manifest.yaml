@@ -83,6 +83,10 @@ actions:
           type: json
         as: revision
         optional: true
+  - name: khatm.doctor
+    match:
+      method: POST
+      path: /khatm.doctor
   - name: users.list
     match:
       method: POST

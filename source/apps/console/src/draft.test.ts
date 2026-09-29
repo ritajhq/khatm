@@ -49,8 +49,16 @@ Deno.test('branding: edits round-trip and reach the preview', () => {
     name: 'Acme',
     tokens: { primary: 'red' },
     messages: {},
+    parts: { card: { 'border-radius': '0' }, submit: {} },
+    slots: { en: { legal: '<p>Terms</p>' } },
+    pages: 'hosted',
   })
   assertEquals(branding(next).tokens, { primary: 'red' })
+  // Empty parts and the default page mode stay out of the manifest.
+  assertEquals((next.branding as Record<string, unknown>).parts, {
+    card: { 'border-radius': '0' },
+  })
+  assertEquals('pages' in (next.branding as object), false)
   const result = check(JSON.stringify(next))
   assert(result.ok)
   const query = previewQuery(result.resolved)
@@ -59,8 +67,19 @@ Deno.test('branding: edits round-trip and reach the preview', () => {
   )
   assertEquals(decoded.config.name, 'Acme')
   assertEquals(decoded.tokens, { primary: 'red' })
+  assertEquals(decoded.parts, { card: { 'border-radius': '0' } })
+  assertEquals(decoded.config.slots.en.legal, '<p>Terms</p>')
   assertEquals(
-    branding(withBranding(next, { tokens: {}, messages: {} })).name,
+    branding(withBranding(next, { ...branding(next), name: undefined })).name,
     undefined,
   )
+})
+
+Deno.test('check: an invalid draft still hands its JSON to the editors', () => {
+  const invalid = check(JSON.stringify({
+    ...base,
+    branding: { slots: { en: { footer: '<img src=x>' } } },
+  }))
+  assert(!invalid.ok)
+  assertEquals(branding(invalid.authored!).slots.en.footer, '<img src=x>')
 })

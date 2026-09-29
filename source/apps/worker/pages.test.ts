@@ -11,6 +11,7 @@ const config: PageConfig = {
   returnOrigins: ['https://app.example.com'],
   landing: 'https://app.example.com',
   messages: { en: { 'signIn.title': '</script><img src=x onerror=alert(1)>' } },
+  slots: {},
 }
 
 async function serve(tokens: Record<string, string> = {}) {

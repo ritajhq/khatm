@@ -7,9 +7,9 @@ export function Field(
     & InputHTMLAttributes<HTMLInputElement>,
 ) {
   return (
-    <div className='grid gap-2'>
-      <Label htmlFor={id}>{label}</Label>
-      <Input id={id} name={id} {...props} />
+    <div data-khatm-part='field' className='grid gap-2'>
+      <Label data-khatm-part='label' htmlFor={id}>{label}</Label>
+      <Input data-khatm-part='input' id={id} name={id} {...props} />
     </div>
   )
 }

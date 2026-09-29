@@ -274,7 +274,7 @@ That shapes the whole design:
 3. Apply the manifest's `bootstrap` block once, the first time a live revision has one: create the users it names that don't exist yet and set the roles it gives them. Users it creates have no password, so the operator sets one over the socket (`printf '%s' "$PASSWORD" | docker exec -i khatm khatm users set-password root@example.com`). Each step is idempotent, so a failed run is retried on the next apply or start. After it succeeds it never runs again, and later edits to the block are ignored.
 4. The operator uses the Unix socket until the console and its idhn guard are set up: `docker exec khatm khatm plan` and `apply` work before anyone can sign in.
 
-A `doctor` command checks database reachability, secret resolution, base URL consistency and OAuth redirect URIs.
+`khatm doctor [manifest.json] [--guard file.yaml …]` (control procedure `khatm.doctor`, also a card on the console's overview) checks the active or a given manifest from where the orchestrator runs: that every secret resolves, that the auth database is reachable and what the next apply would migrate, whether khatm's own store is the auth database, that the serving worker and the public base URL answer, base URL and cookie consistency (plain http on a public host, apps the session cookie never reaches), the OAuth redirect URIs to register with each provider, and consumers' guard manifests against the session contract (session URL, cookie name, issuer, claims). It exits 1 when a check fails.
 
 ## Shared code architecture
 
@@ -426,9 +426,13 @@ Because the auth server is an IdP, it owns the login pages (users are redirected
 | --- | --- | --- |
 | 1. Design tokens | Colors, logo, favicon, font, radius, light/dark, layout variant (card or split screen), as CSS custom properties | None, applied hot |
 | 2. Copy and i18n | Every string overridable per locale, keyed message bundles | None |
-| 3. Scoped CSS | Shadow DOM or namespaced classes, stable `::part()` names | Low |
-| 4. Slots | Named injection points (header, footer, legal text) accepting sanitized HTML | Medium |
-| 5. Headless | API only; client app builds its own pages with the Better Auth client | Customer-owned |
+| 3. Scoped CSS | `branding.parts`: declarations per stable part name, applied to `[data-khatm-part="<name>"]` | Low |
+| 4. Slots | `branding.slots`: sanitized HTML per locale for the header, footer and legal text | Medium |
+| 5. Headless | `branding.pages: headless`: API only; client apps build their own pages with the Better Auth client | Customer-owned |
+
+- **Scoped CSS without a stylesheet.** Operators don't write selectors. They write declarations per part (`parts: { card: { border-radius: "0" } }`), and khatm writes each as a `:root [data-khatm-part="card"]` rule into the same inline stylesheet as the tokens, allowed by its hash in the CSP. Values follow the token rules, so a rule can't close itself, start another or fetch anything. The part names (`PART_NAMES` in `core/spec`: page, brand, card, header, title, description, content, form, field, label, input, submit, social, provider, alert, switch and the slots) are a public interface: the list only grows.
+- **Slots are rebuilt, not filtered.** The sanitizer writes allowed tags (p, a, strong, em, b, i, small, span, br and lists) out again with no attributes except a link's `href`, which must be http(s), mailto or a path, and escapes everything else as text. The manifest parser rejects a slot the sanitizer would change, so the operator finds out at plan time, and the pages sanitize again before rendering.
+- **Headless** keeps the API and CORS for the declared apps and serves no `/login`, `/signup` or `/error`.
 
 ### Implementation notes
 
@@ -491,4 +495,9 @@ Working backwards from a demo where `apply` swaps a running instance:
    - The CLI has `users …`, `sessions revoke` and `audit`. The console has a Users screen (search, paging, a panel with role, ban, verification, password, sign-in methods, sessions and removal) and an Audit screen that shows actors and targets by email, kept apart from the control-plane tabs.
    - Tests: `Administration` against real Better Auth, the orchestrator end to end on SQLite and Postgres (bootstrap, ban signing the user out and blocking sign-in, the admin surface moving with a swap, the audit trail), and the console browser test driving Users and Audit behind the stub guard. The new guard manifest parses with idhn's loader on `feat/session-bearer`.
    - Not done: organisations and teams, 2FA and passkey panels (their plugins aren't in the registry), password reset by email, impersonation (see Rules), and panels chosen by the plugin registry, since only the admin plugin's are there yet.
-8. Scoped CSS, slots, headless mode, `doctor`.
+8. (done, `feat/orchestrator`) Scoped CSS, slots, headless mode, `doctor`. What exists:
+   - `BrandingSpec` gained `parts`, `slots` and `pages`, all optional so existing manifests keep their digests. The login app marks its elements with `data-khatm-part`, and renders the slots through the sanitizer (see Customization layers).
+   - The console's branding screen edits part rules, the English slots (flagging refused markup as you type, and staying editable while the draft is invalid) and the headless switch, and the preview renders parts and slots.
+   - `core/doctor` holds the checks: the manifest-only ones are pure, and the runtime ones take probes, which the orchestrator supplies (see First boot). The CLI reads consumers' guard manifests as YAML.
+   - Tests: the sanitizer against script, event handler, `javascript:` and entity-encoded links; part CSS in the real browser (square card, uppercase button), the legal slot in two languages, and headless serving the API but not `/login`; doctor's checks on the portal fixture and the shipped guard manifests; doctor end to end, catching a guard with the wrong cookie and an unknown claim.
+   - Not done: slots in other locales from the console (the manifest JSON takes them), per-OAuth-client branding, emails, a logo, and the `deploy/` part of the bundle, where `doctor`'s guard check would also run against rendered consumer manifests.

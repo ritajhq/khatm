@@ -29,9 +29,9 @@ export {
 } from './secrets.ts'
 export {
   type AdminAccount,
+  Administration,
   AdminRejectedError,
   type AdminSession,
-  Administration,
   type AdminUser,
   ProtectedUserError,
   UnknownUserError,

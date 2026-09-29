@@ -15,6 +15,7 @@ import {
   TableRow,
 } from '@khatm-libs/ui'
 import { api, describeError } from '../api.ts'
+import { Doctor } from '../components/doctor.tsx'
 
 type Event = { at: string; type: string; data: Record<string, unknown> }
 
@@ -61,6 +62,7 @@ export function Overview({ refresh }: { refresh: number }) {
           </CardContent>
         )}
       </Card>
+      {active && <Doctor />}
       <Card>
         <CardHeader className='text-left'>
           <CardTitle className='text-base'>Recent events</CardTitle>

@@ -153,6 +153,32 @@ export const manifest = procedure(
   }),
 )
 
+export const FindingView = z.object({
+  check: z.string(),
+  severity: z.enum(['ok', 'info', 'warn', 'fail']),
+  message: z.string(),
+})
+export type FindingView = z.infer<typeof FindingView>
+
+/**
+ * Checks an installation: the manifest's consistency, secrets and database
+ * as the orchestrator sees them, the serving worker, and consumers' guard
+ * manifests against the session contract.
+ */
+export const doctor = procedure(
+  'khatm.doctor',
+  z.object({
+    /** Defaults to the active revision's manifest. */
+    manifest: ManifestInput.optional(),
+    /** Consumers' idhn guard manifests, parsed from YAML. */
+    guards: z.array(z.object({
+      name: z.string().min(1),
+      manifest: z.record(z.string(), z.unknown()),
+    })).max(50).default([]),
+  }),
+  z.object({ findings: z.array(FindingView) }),
+)
+
 const Paging = {
   limit: z.number().int().min(1).max(200).default(50),
   offset: z.number().int().min(0).default(0),
@@ -270,6 +296,7 @@ export const procedures = {
   events,
   export: exportBundle,
   manifest,
+  doctor,
   listUsers,
   lookupUsers,
   getUser,

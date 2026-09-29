@@ -1,4 +1,9 @@
-import { landingApplication, type ResolvedManifest } from '@khatm/spec'
+import {
+  landingApplication,
+  type ResolvedManifest,
+  sanitizeSlot,
+  SlotName,
+} from '@khatm/spec'
 import { z } from 'zod'
 
 /**
@@ -21,6 +26,8 @@ export const PageConfig = z.object({
   /** Where sign-in lands without a valid `return_to`. */
   landing: z.string().optional(),
   messages: z.record(z.string(), z.record(z.string(), z.string())),
+  /** Sanitized slot markup per locale; the page picks a locale like it does for messages. */
+  slots: z.record(z.string(), z.partialRecord(SlotName, z.string())),
 })
 export type PageConfig = z.infer<typeof PageConfig>
 
@@ -38,7 +45,26 @@ export function pageConfig(resolved: ResolvedManifest): PageConfig {
     returnOrigins: firstParty.map((a) => a.origin),
     landing: landingApplication(auth.applications)?.origin,
     messages: resolved.branding.messages,
+    slots: sanitizedSlots(resolved.branding.slots ?? {}),
   }
+}
+
+/** Every slot through the sanitizer again: the manifest was checked, but this is what reaches the page. */
+export function sanitizedSlots(
+  slots: Readonly<Record<string, Partial<Record<SlotName, string>>>>,
+): PageConfig['slots'] {
+  return Object.fromEntries(
+    Object.entries(slots).map(([locale, byName]) => [
+      locale,
+      Object.fromEntries(
+        Object.entries(byName)
+          .filter(([name, html]) =>
+            SlotName.safeParse(name).success && typeof html === 'string'
+          )
+          .map(([name, html]) => [name, sanitizeSlot(html as string).html]),
+      ),
+    ]),
+  )
 }
 
 /** Whether the pages have any way to sign in at all. */

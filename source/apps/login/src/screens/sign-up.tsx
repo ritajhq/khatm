@@ -54,16 +54,24 @@ export function SignUp() {
 
   return (
     <Layout>
-      <Card>
-        <CardHeader>
-          <CardTitle>{t('signUp.title')}</CardTitle>
-          <CardDescription>{t('signUp.description')}</CardDescription>
+      <Card data-khatm-part='card'>
+        <CardHeader data-khatm-part='header'>
+          <CardTitle data-khatm-part='title'>{t('signUp.title')}</CardTitle>
+          <CardDescription data-khatm-part='description'>
+            {t('signUp.description')}
+          </CardDescription>
         </CardHeader>
-        <CardContent className='grid gap-4'>
-          {failed && <Alert tone='destructive'>{failed}</Alert>}
-          {message && <Alert>{message}</Alert>}
+        <CardContent data-khatm-part='content' className='grid gap-4'>
+          {failed && (
+            <Alert data-khatm-part='alert' tone='destructive'>{failed}</Alert>
+          )}
+          {message && <Alert data-khatm-part='alert'>{message}</Alert>}
           {!message && (
-            <form onSubmit={submit} className='grid gap-4'>
+            <form
+              data-khatm-part='form'
+              onSubmit={submit}
+              className='grid gap-4'
+            >
               <Field
                 id='name'
                 label={t('signUp.name')}
@@ -93,12 +101,12 @@ export function SignUp() {
                 minLength={8}
                 required
               />
-              <Button type='submit' disabled={busy}>
+              <Button data-khatm-part='submit' type='submit' disabled={busy}>
                 {busy ? t('signUp.submitting') : t('signUp.submit')}
               </Button>
             </form>
           )}
-          <p className='text-center text-sm'>
+          <p data-khatm-part='switch' className='text-center text-sm'>
             {t('signUp.haveAccount')}{' '}
             <a
               href={`/login${search}`}

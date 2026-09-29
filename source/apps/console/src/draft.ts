@@ -15,7 +15,8 @@ export type Authored = Record<string, unknown>
 
 export type Checked =
   | { ok: true; authored: Authored; resolved: ResolvedManifest }
-  | { ok: false; problems: string[] }
+  /** `authored` is there when the draft is a JSON object, so editors can keep working on it. */
+  | { ok: false; problems: string[]; authored?: Authored }
 
 export function check(text: string): Checked {
   let authored: unknown
@@ -36,13 +37,11 @@ export function check(text: string): Checked {
     const resolved = defaultRegistry().resolve(parseManifest(authored))
     return { ok: true, authored: authored as Authored, resolved }
   } catch (error) {
-    if (
-      error instanceof InvalidManifestError ||
-      error instanceof UnresolvableManifestError
-    ) {
-      return { ok: false, problems: error.problems }
-    }
-    return { ok: false, problems: [String(error)] }
+    const problems = error instanceof InvalidManifestError ||
+        error instanceof UnresolvableManifestError
+      ? error.problems
+      : [String(error)]
+    return { ok: false, problems, authored: authored as Authored }
   }
 }
 
@@ -90,27 +89,62 @@ export interface Branding {
   name?: string
   tokens: Record<string, string>
   messages: Record<string, Record<string, string>>
+  /** Scoped CSS: declarations per stable part. */
+  parts: Record<string, Record<string, string>>
+  /** Slot markup per locale, then per slot. */
+  slots: Record<string, Record<string, string>>
+  pages: 'hosted' | 'headless'
 }
 
 export function branding(authored: Authored): Branding {
-  const value = authored.branding as Partial<Branding> | undefined
+  const value = authored.branding as
+    | Partial<Omit<Branding, 'pages'>> & { pages?: string }
+    | undefined
   return {
     ...(value?.name ? { name: value.name } : {}),
     tokens: { ...(value?.tokens ?? {}) },
     messages: { ...(value?.messages ?? {}) },
+    parts: { ...(value?.parts ?? {}) },
+    slots: { ...(value?.slots ?? {}) },
+    pages: value?.pages === 'headless' ? 'headless' : 'hosted',
   }
 }
 
+/** Writes the branding back, leaving out what is empty or default so the manifest stays small. */
 export function withBranding(authored: Authored, next: Branding): Authored {
-  const { name, ...rest } = next
-  return { ...authored, branding: name ? { name, ...rest } : rest }
+  const { name, parts, slots, pages, ...rest } = next
+  const nonEmpty = <T extends Record<string, Record<string, string>>>(
+    value: T,
+  ) =>
+    Object.fromEntries(
+      Object.entries(value).filter(([, inner]) =>
+        Object.keys(inner).length > 0
+      ),
+    )
+  const keptParts = nonEmpty(parts)
+  const keptSlots = nonEmpty(slots)
+  return {
+    ...authored,
+    branding: {
+      ...(name ? { name } : {}),
+      ...rest,
+      ...(Object.keys(keptParts).length > 0 ? { parts: keptParts } : {}),
+      ...(Object.keys(keptSlots).length > 0 ? { slots: keptSlots } : {}),
+      ...(pages === 'headless' ? { pages } : {}),
+    },
+  }
 }
 
 /** What the preview frame needs, as the `draft` query parameter. */
 export function previewQuery(resolved: ResolvedManifest): string {
-  const draft: { config: PageConfig; tokens: Record<string, string> } = {
+  const draft: {
+    config: PageConfig
+    tokens: Record<string, string>
+    parts: Record<string, Record<string, string>>
+  } = {
     config: pageConfig(resolved),
     tokens: resolved.branding.tokens,
+    parts: resolved.branding.parts ?? {},
   }
   const bytes = new TextEncoder().encode(JSON.stringify(draft))
   return btoa(String.fromCharCode(...bytes))

@@ -238,6 +238,37 @@ async function scenario(
     )
     assertEquals(entries[0].target, promoted.user.id)
 
+    // doctor sees the running installation, and a guard that drifted from the contract.
+    const { findings } = await call('khatm.doctor', {
+      guards: [{
+        name: 'places',
+        manifest: {
+          authentication: [{
+            scheme: 'session-cookie',
+            session_url: `${ORIGIN}/api/auth/get-session`,
+            issuer: 'e2e',
+            claims: ['email', 'tenant'],
+            cookie: 'better-auth.session_token',
+          }],
+        },
+      }],
+    }) as { findings: { check: string; severity: string }[] }
+    assertEquals(
+      findings.filter((f) => f.severity !== 'info')
+        .map((f) => `${f.severity} ${f.check}`),
+      [
+        'ok base-url',
+        // The apps are on *.localhost with no cookie domain: true, and worth saying.
+        'warn cookie-domain',
+        'warn cookie-domain',
+        'ok secrets',
+        'ok database',
+        'ok worker',
+        'warn public-url',
+        'fail guard:places',
+      ],
+    )
+
     // A worker that will not start leaves revision 2 serving.
     const servingBefore = runtime.proxy.upstream
     broken!.broken = true

@@ -1,4 +1,19 @@
-import type { SecretSource } from '@khatm/auth'
+import {
+  planMigrations,
+  processSecrets,
+  resolveAllSecrets,
+  type SecretSource,
+  tryResolveSecret,
+  UnresolvedSecretsError,
+} from '@khatm/auth'
+import {
+  configFindings,
+  type Finding,
+  guardFindings,
+  type GuardManifest,
+  runtimeFindings,
+} from '@khatm/doctor'
+import type { ResolvedManifest } from '@khatm/spec'
 import {
   Deployment,
   type DeploymentEvent,
@@ -53,6 +68,11 @@ export interface Runtime {
   readonly admin: WorkerAdmin
   /** Applies the manifest's bootstrap block, unless that already happened. */
   readonly bootstrap: Bootstrap
+  /** Checks a manifest as this installation would run it. */
+  doctor(
+    resolved: ResolvedManifest,
+    guards: readonly GuardManifest[],
+  ): Promise<Finding[]>
   close(): Promise<void>
 }
 
@@ -107,6 +127,49 @@ export async function createRuntime(config: RuntimeConfig): Promise<Runtime> {
     audit,
     admin,
     bootstrap,
+    async doctor(resolved, guards) {
+      const source = config.secrets ?? processSecrets
+      const runtime = await runtimeFindings(resolved, {
+        missingSecrets() {
+          try {
+            resolveAllSecrets(resolved.auth, source)
+            return []
+          } catch (error) {
+            if (error instanceof UnresolvedSecretsError) return error.refs
+            throw error
+          }
+        },
+        async database() {
+          const plan = await planMigrations(resolved, source)
+          return {
+            pending: [
+              ...plan.created,
+              ...plan.added.map((a) => `${a.table}.${a.fields.join('/')}`),
+            ],
+          }
+        },
+        sharesStore() {
+          const url = tryResolveSecret(resolved.auth.database.url, source)
+          return url === undefined
+            ? undefined
+            : url.replace(/^sqlite:(\/\/)?/, '') ===
+              config.store.replace(/^sqlite:(\/\/)?/, '')
+        },
+        async status(url) {
+          const response = await fetch(url, {
+            signal: AbortSignal.timeout(3_000),
+          })
+          await response.body?.cancel()
+          return response.status
+        },
+        upstream: proxy.upstream,
+      })
+      return [
+        ...configFindings(resolved),
+        ...runtime,
+        ...guardFindings(resolved, guards),
+      ]
+    },
     async close() {
       await deployment.shutdown()
       await client.close()

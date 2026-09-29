@@ -178,6 +178,17 @@ Deno.test({
       assert(second?.revision.id !== first.revision.id)
       assertEquals(second?.revision.author, (await sessionUser(page, auth)).id)
 
+      // The overview runs doctor against the serving revision.
+      await page.goto(`${consoles[0]}/#/overview`)
+      await page.getByRole('button', { name: 'Run checks' }).click()
+      await page.getByText('Every secret resolves').waitFor()
+      if (shots) {
+        await page.screenshot({
+          path: `${shots}/console-doctor.png`,
+          fullPage: true,
+        })
+      }
+
       // Console B sees it, and rolls back; removing a plugin needs confirmation.
       const other = await context.newPage()
       await other.goto(`${consoles[1]}/#/revisions`)
@@ -200,6 +211,23 @@ Deno.test({
       const preview = page.frameLocator('iframe[title="Login page preview"]')
       await preview.getByText('Acme').waitFor()
       await expectPrimary(page, 'rgb(10, 120, 30)')
+      await page.getByLabel('Part').selectOption('card')
+      await page.getByLabel('CSS property').fill('border-radius')
+      await page.getByRole('button', { name: 'Add rule' }).click()
+      await page.getByLabel('card border-radius').fill('0px')
+      await page.getByLabel('Legal').fill(
+        '<p>See the <a href="https://example.com/terms">terms</a></p>',
+      )
+      await preview.getByRole('link', { name: 'terms' }).waitFor()
+      await expectInPreview(
+        page,
+        `getComputedStyle(document.querySelector('[data-khatm-part="card"]')).borderTopLeftRadius`,
+        '0px',
+      )
+      // Markup the pages would refuse is flagged while typing.
+      await page.getByLabel('Footer').fill('<img src=x>')
+      await page.getByText("<img> isn't allowed").first().waitFor()
+      await page.getByLabel('Footer').fill('')
       if (shots) {
         await page.screenshot({
           path: `${shots}/console-branding.png`,
@@ -289,14 +317,20 @@ async function sessionUser(page: Page, auth: string): Promise<{ id: string }> {
   return (await response.json()).user
 }
 
-async function expectPrimary(page: Page, value: string) {
-  const frame = page.frame({ url: /\/preview\// })!
+function expectPrimary(page: Page, value: string) {
+  return expectInPreview(
+    page,
+    "getComputedStyle(document.documentElement).getPropertyValue('--primary').trim()",
+    value,
+  )
+}
+
+async function expectInPreview(page: Page, expression: string, value: string) {
   for (let i = 0; i < 50; i++) {
-    const current = await frame.evaluate(
-      "getComputedStyle(document.documentElement).getPropertyValue('--primary').trim()",
-    )
+    const frame = page.frame({ url: /\/preview\// })
+    const current = await frame?.evaluate(expression).catch(() => undefined)
     if (current === value) return
     await new Promise((r) => setTimeout(r, 100))
   }
-  throw new Error(`The preview never showed --primary: ${value}`)
+  throw new Error(`The preview never showed ${value} for ${expression}`)
 }

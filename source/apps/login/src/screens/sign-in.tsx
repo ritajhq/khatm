@@ -46,15 +46,25 @@ export function SignIn() {
 
   return (
     <Layout>
-      <Card>
-        <CardHeader>
-          <CardTitle>{t('signIn.title')}</CardTitle>
-          <CardDescription>{t('signIn.description')}</CardDescription>
+      <Card data-khatm-part='card'>
+        <CardHeader data-khatm-part='header'>
+          <CardTitle data-khatm-part='title'>{t('signIn.title')}</CardTitle>
+          <CardDescription data-khatm-part='description'>
+            {t('signIn.description')}
+          </CardDescription>
         </CardHeader>
-        <CardContent className='grid gap-4'>
-          {failed && <Alert tone='destructive'>{t('signIn.failed')}</Alert>}
+        <CardContent data-khatm-part='content' className='grid gap-4'>
+          {failed && (
+            <Alert data-khatm-part='alert' tone='destructive'>
+              {t('signIn.failed')}
+            </Alert>
+          )}
           {config.emailAndPassword.enabled && (
-            <form onSubmit={submit} className='grid gap-4'>
+            <form
+              data-khatm-part='form'
+              onSubmit={submit}
+              className='grid gap-4'
+            >
               <Field
                 id='identifier'
                 label={config.username
@@ -71,7 +81,7 @@ export function SignIn() {
                 autoComplete='current-password'
                 required
               />
-              <Button type='submit' disabled={busy}>
+              <Button data-khatm-part='submit' type='submit' disabled={busy}>
                 {busy ? t('signIn.submitting') : t('signIn.submit')}
               </Button>
             </form>
@@ -91,7 +101,7 @@ export function SignIn() {
             </>
           )}
           {config.emailAndPassword.enabled && (
-            <p className='text-center text-sm'>
+            <p data-khatm-part='switch' className='text-center text-sm'>
               {t('signIn.noAccount')}{' '}
               <a
                 href={`/signup${search}`}

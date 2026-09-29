@@ -8,6 +8,7 @@ import {
 } from '@khatm/contract/guard'
 import { defaultRegistry } from '@khatm/registry'
 import { parseManifest } from '@khatm/spec'
+import { parse as parseYaml } from '@std/yaml'
 import type { PlanView, RevisionView } from '@khatm/contract'
 import { IDENTITY_USAGE, runIdentity } from './identity.ts'
 
@@ -63,6 +64,8 @@ Commands:
   import <dir>               Apply the manifest in an exported bundle (--yes)
   guard <control|console> <manifest.json>
                              Print the idhn guard manifest for that surface
+  doctor [manifest.json]     Check the installation, or a manifest before applying it
+                             (--guard <file.yaml>, repeatable: consumers' guard manifests)
   status                     Which revision is serving
   history                    Past revisions, newest first (--limit N)
   events                     Recent deployment events (--limit N)
@@ -100,6 +103,7 @@ export async function run(
         actor: { type: 'string' },
         target: { type: 'string' },
         'password-stdin': { type: 'boolean', default: false },
+        guard: { type: 'string', multiple: true },
         help: { type: 'boolean', default: false },
       },
     })
@@ -160,6 +164,7 @@ export async function run(
       'users',
       'sessions',
       'audit',
+      'doctor',
     ].includes(command)
   ) {
     io.err(`Unknown command: ${command}\n\n${USAGE}`)
@@ -229,6 +234,32 @@ export async function run(
           parsed.values.yes,
           parsed.values.reason ?? `import of revision ${from}`,
         )
+      }
+      case 'doctor': {
+        const guards = []
+        for (const file of parsed.values.guard ?? []) {
+          guards.push({
+            name: file.replace(/^.*\//, '').replace(/\.ya?ml$/, ''),
+            manifest: parseYaml(await io.readFile(file)) as Record<
+              string,
+              unknown
+            >,
+          })
+        }
+        const { findings } = await api.doctor({
+          manifest: target === undefined
+            ? undefined
+            : await readManifest(io, target),
+          guards,
+        })
+        for (const finding of findings) {
+          io.out(
+            `${finding.severity.toUpperCase().padEnd(5)} ${
+              finding.check.padEnd(18)
+            } ${finding.message}`,
+          )
+        }
+        return findings.some((f) => f.severity === 'fail') ? 1 : 0
       }
       case 'export': {
         const { revision, files } = await api.export({ revision: target })

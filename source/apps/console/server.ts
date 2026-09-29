@@ -1,5 +1,6 @@
 import { procedures } from '@khatm/contract'
 import { PageConfig, renderPage } from '@khatm/pages'
+import { BrandingSpec } from '@khatm/spec'
 
 export interface ConsoleOptions {
   /** The built console: `index.html`, `main.js`, `main.css`. */
@@ -120,7 +121,7 @@ export async function createConsoleHandler(
       return asset(loginAssets, pathname.slice('/preview/_khatm/'.length))
     }
     if (pathname.startsWith('/preview/')) {
-      let draft: { config: unknown; tokens?: unknown }
+      let draft: { config: unknown; tokens?: unknown; parts?: unknown }
       try {
         draft = JSON.parse(decodeBase64Url(searchParams.get('draft') ?? ''))
       } catch {
@@ -132,10 +133,13 @@ export async function createConsoleHandler(
           Object.entries(draft.tokens).filter(([, v]) => typeof v === 'string'),
         ) as Record<string, string>
         : {}
+      // Shape only: `themeCss` drops any part, property or value that isn't valid.
+      const parts = BrandingSpec.shape.parts.safeParse(draft.parts)
       if (!config.success) return new Response('Bad draft', { status: 400 })
       const page = await renderPage(loginTemplate, config.data, tokens, {
         assetBase: '/preview/_khatm/',
         frameAncestors: "'self'",
+        parts: parts.success ? parts.data : {},
       })
       return new Response(page.html, {
         headers: {

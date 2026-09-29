@@ -26,16 +26,20 @@ async function main(): Promise<void> {
     | undefined) ?? []
   const dist = Deno.env.get('KHATM_LOGIN_DIST') ??
     new URL('../login/dist', import.meta.url).pathname
-  const pages = await loadPages({
-    dist,
-    config: pageConfig(resolved),
-    tokens: resolved.branding.tokens,
-  }).catch(() => {
-    console.warn(
-      `No login pages in ${dist}: run "deno task build" in apps/login`,
-    )
-    return undefined
-  })
+  // Headless: the service's own apps own the pages, so there are none here.
+  const pages = resolved.branding.pages === 'headless'
+    ? undefined
+    : await loadPages({
+      dist,
+      config: pageConfig(resolved),
+      tokens: resolved.branding.tokens,
+      parts: resolved.branding.parts,
+    }).catch(() => {
+      console.warn(
+        `No login pages in ${dist}: run "deno task build" in apps/login`,
+      )
+      return undefined
+    })
   const server = Deno.serve(
     { port, hostname: '127.0.0.1', onListen: () => {} },
     createHandler(auth, { origins }, pages),
