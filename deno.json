@@ -4,5 +4,6 @@
     "source/core/**",
     "source/libs/**",
     ".ensemble/kits/**"
-  ]
+  ],
+  "nodeModulesDir": "auto"
 }

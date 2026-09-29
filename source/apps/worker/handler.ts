@@ -13,6 +13,7 @@ const METHODS = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
 export function createHandler(
   auth: Pick<Auth, 'handler'>,
   cors: Cors,
+  pages?: (request: Request) => Response | undefined,
 ): (request: Request) => Promise<Response> {
   const allowed = new Set(cors.origins)
 
@@ -31,6 +32,8 @@ export function createHandler(
   }
 
   return async (request) => {
+    const page = pages?.(request)
+    if (page) return page
     const { pathname } = new URL(request.url)
     if (pathname !== '/api/auth' && !pathname.startsWith('/api/auth/')) {
       return new Response('Not found', { status: 404 })

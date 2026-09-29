@@ -1,6 +1,8 @@
 import { createAuth } from '@khatm/auth'
 import type { ResolvedManifest } from '@khatm/spec'
+import { pageConfig } from '@khatm/pages'
 import { createHandler } from './handler.ts'
+import { loadPages } from './pages.ts'
 
 /**
  * One Better Auth worker. The orchestrator writes the resolved manifest to
@@ -19,9 +21,21 @@ async function main(): Promise<void> {
   const origins = (resolved.derived['trustedOrigins']?.value as
     | string[]
     | undefined) ?? []
+  const dist = Deno.env.get('KHATM_LOGIN_DIST') ??
+    new URL('../login/dist', import.meta.url).pathname
+  const pages = await loadPages({
+    dist,
+    config: pageConfig(resolved),
+    tokens: resolved.branding.tokens,
+  }).catch(() => {
+    console.warn(
+      `No login pages in ${dist}: run "deno task build" in apps/login`,
+    )
+    return undefined
+  })
   const server = Deno.serve(
     { port, hostname: '127.0.0.1', onListen: () => {} },
-    createHandler(auth, { origins }),
+    createHandler(auth, { origins }, pages),
   )
 
   const shutdown = async () => {

@@ -6,10 +6,13 @@
     "better-auth": "npm:better-auth@^1.7.3",
     "better-auth/db/migration": "npm:better-auth@^1.7.3/db/migration",
     "better-auth/plugins": "npm:better-auth@^1.7.3/plugins",
-    "pg": "npm:pg@^8.13.1"
+    "pg": "npm:pg@^8.13.1",
+    "playwright-core": "npm:playwright-core@1.55.0"
   },
   "compilerOptions": {
-    "types": ["npm:@types/pg@^8.11.10"]
+    "types": [
+      "npm:@types/pg@^8.11.10"
+    ]
   },
   "fmt": {
     "semiColons": false,
@@ -18,7 +21,9 @@
   },
   "lint": {
     "rules": {
-      "exclude": ["no-slow-types"]
+      "exclude": [
+        "no-slow-types"
+      ]
     }
   }
 }

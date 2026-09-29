@@ -298,7 +298,8 @@ khatm is an Ensemble project, so the split follows Ensemble's rule: `core` speak
 | `source/apps/worker` | The Better Auth process, built from a resolved manifest it is handed at start | — |
 | `source/apps/cli` | Commands, prompts, table output | Operators, scripts |
 | `source/apps/console/{server,client}` | Forms, diffs, live preview, user admin. Stateless | Whoever idhn lets in |
-| `source/apps/login` | Hosted sign-in pages, served by the worker's origin | End users |
+| `source/core/pages` | What the hosted pages need from a resolved manifest: `PageConfig`, message catalog, `safeReturnTo`, theme CSS. Pure, used by the worker and the login app | worker, login |
+| `source/apps/login` | Hosted sign-in pages (React, Tailwind, shadcn-style components), built to static files the worker serves | End users |
 | `source/ship/khatm` | The auth image: orchestrator and worker | — |
 | `source/ship/console` | The console image | — |
 | `source/ship/guard/control` | The idhn guard manifest for the control API, one action per contract procedure | Consumers' idhn deployment |
@@ -461,7 +462,14 @@ Working backwards from a demo where `apply` swaps a running instance:
 2. (done, `feat/orchestrator`) Orchestrator: supervisor, child worker built from a resolved manifest, reverse proxy, health checks, blue/green swap, revision storage, apply lock. Built and tested end to end on SQLite and Postgres. MySQL and MSSQL are declared in the spec, but `openDatabase` refuses them until their Deno drivers are chosen; the SQL stores also cover only SQLite and Postgres for now.
 3. (done, `feat/orchestrator`) `core/contract` + `core/client` + minimal CLI (Unix socket first): `plan`, `apply`, `status`, `history`, `events`, `rollback`. The control port trusts `x-idhn-subject` for the caller, the socket is `socket`. The CLI over HTTP with a bearer token waits for the console step.
 4. (done, `feat/orchestrator`) Artifact bundle on apply, then `export`/`import` and the `auth.ts` eject file. Missing from the bundle: `migrations/` and `deploy/` (see Bundle contents). `core/bundle` is the new package; a test loads the generated `auth.ts` and checks it builds the same options as `createAuth`.
-5. Hosted login pages with design tokens and copy overrides.
+5. (done, `feat/orchestrator`) Hosted login pages with design tokens and copy overrides. What exists:
+   - `core/pages` projects the resolved manifest into a `PageConfig` (sign-in methods, username, providers, allowed `return_to` origins, landing app, message overrides) and holds the message catalog, `safeReturnTo` and the token-to-CSS step.
+   - `apps/login` is the React 19, Tailwind 4 and shadcn-style app: sign-in (email or username, social buttons), sign-up, error and "no sign-in method" pages.
+   - The worker serves it at `/login`, `/signup` and `/error` (`/` redirects to `/login`), with the theme injected as one `:root` rule, the config as JSON, and a strict CSP: the theme rule is allowed by its hash, nothing else inline.
+   - `BrandingSpec` gained an optional `name`, and token names and values are validated at parse time (no braces, semicolons, comments, `url()` or `@import`), so a manifest can't inject CSS.
+   - A Playwright test drives real Chromium through the proxy: sign up, sign in by username, a wrong password, `return_to` to a stranger falling back to the landing app, a token reaching the page, and Italian copy chosen by browser language, with no console errors.
+   - Not done: passkey, 2FA and password-reset pages (their plugins aren't in the registry yet), assets such as a logo, dark mode toggling beyond the system preference, and email templates.
+   - Build: `deno task build` in `apps/login` runs esbuild and the Tailwind CLI directly, because `@ritaj/ui` and `@ritaj/design` are not published and Ensemble's `ens` build can't be run in this environment. The worker reads the result from `KHATM_LOGIN_DIST` (default `apps/login/dist`); wrapping the same build in an Ensemble target is left for the delivery step. The workspace sets `nodeModulesDir: auto` for this.
 6. Console image and the control API's idhn guard manifest: config forms from schemas, branding preview, running behind idhn with several instances.
 7. Identity administration and the audit log.
 8. Scoped CSS, slots, headless mode, `doctor`.

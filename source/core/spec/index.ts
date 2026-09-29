@@ -7,7 +7,7 @@ export {
   OAuthApplication,
 } from './application.ts'
 export { AuthSpec } from './auth-spec.ts'
-export { BrandingSpec } from './branding.ts'
+export { BrandingSpec, TokenName, TokenValue } from './branding.ts'
 export { canonicalize, sha256 } from './canonical.ts'
 export { DatabaseSpec, Dialect } from './database.ts'
 export type { Json } from './json.ts'
