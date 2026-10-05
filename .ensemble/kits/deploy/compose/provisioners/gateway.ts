@@ -1,6 +1,6 @@
 import * as KitSdk from "@ensemble/kit-sdk";
 import { PROJECT_NETWORK } from "../compose-document.ts";
-import { caddyfile } from "./caddy-config.ts";
+import { caddyfile, type Tls, tlsMode } from "./caddy-config.ts";
 
 /**
  * Caddy's own official image, and the reason this kit's gateway is Caddy:
@@ -14,6 +14,29 @@ import { caddyfile } from "./caddy-config.ts";
 const CADDY_IMAGE = "caddy:2.11-alpine";
 /** The host port an HTTPS gateway is reached on, mapping Caddy's own 443 — the port every app's own origins in this repo already spell (`https://<host>.localhost:8443`). */
 const HTTPS_HOST_PORT = 8443;
+
+/** What the gateway publishes on the host when nothing fronts it, per `Tls` — see `gatewayProvisioner` for why HTTPS publishes 8443 alone. */
+const PUBLISHED_PORTS: Readonly<Record<Tls, readonly string[]>> = {
+  internal: [`${HTTPS_HOST_PORT}:443`],
+  none: ["80:80"],
+};
+
+/**
+ * Narrows a gateway's resolved `networks` param to its network names: absent
+ * is none, and anything but a list of strings (say a plain, non-`list`
+ * variable) is rejected rather than rendered as a network named after it.
+ */
+function ingressNetworks(value: unknown): readonly string[] {
+  if (value === undefined) return [];
+  if (Array.isArray(value) && value.every((item) => typeof item === "string")) {
+    return value;
+  }
+  throw new Error(
+    `A gateway's networks must be a list of network names (got ${
+      JSON.stringify(value)
+    }) — a variable feeding it needs \`type: list\`.`,
+  );
+}
 
 /**
  * Fulfills `gateway` (Caddy) on compose — the only kit this Type is
@@ -34,10 +57,10 @@ const HTTPS_HOST_PORT = 8443;
  *
  * Two things about the service entry are load-bearing rather than incidental:
  *
- * - `networks` lists the manifest's ingress network **and** the project's own
- *   network. Every compute the gateway routes to sits on the latter (only the
- *   gateway itself is declared onto `${external.*}`), and a reverse proxy can
- *   only reach an upstream it shares a network with — without this the
+ * - `networks` lists the manifest's ingress networks **and** the project's
+ *   own network. Every compute the gateway routes to sits on the latter
+ *   (only the gateway itself joins an ingress network), and a reverse proxy
+ *   can only reach an upstream it shares a network with — without this the
  *   generated config names hosts this container has no route to, and Caddy
  *   resolves upstreams when it loads its config, so the gateway doesn't
  *   degrade, it fails to start.
@@ -46,7 +69,14 @@ const HTTPS_HOST_PORT = 8443;
  *   whatever the developer already trusted (`ci/scripts/trust-gateway-ca.sh`
  *   in this repo's own portal).
  *
- * Published on `8443:443` when `tls` is set, `80:80` when it isn't — HTTPS
+ * Ports are published only when the manifest gives the gateway no ingress
+ * networks: then nothing fronts it and the host is the only way in (`ens
+ * develop`, browsing `https://<host>:8443`). With ingress networks, whatever
+ * sits on them (a host-level proxy, a tunnel) reaches it there, so it binds
+ * no host port at all — nothing on the host can reach it around that proxy,
+ * and two such stacks on one host never fight over port 80.
+ *
+ * Published on `8443:443` for `tls: internal`, `80:80` for `none` — HTTPS
  * only in the former case, deliberately: Caddy's automatic HTTP→HTTPS
  * redirect names Caddy's own 443, which a host-side 8443 mapping can't
  * reflect, so publishing 80 alongside it would only produce redirects to a
@@ -63,7 +93,8 @@ export function gatewayProvisioner(): KitSdk.Deploy.Provisioner {
       const configName = `${request.name}-caddyfile`;
       const volumeName = `${request.name}-data`;
       const routes = request.params.routes as Parameters<typeof caddyfile>[0];
-      const tls = request.params.tls as string | undefined;
+      const tls = tlsMode(request.params.tls);
+      const ingress = ingressNetworks(request.params.networks);
 
       return {
         fragment: {
@@ -72,8 +103,10 @@ export function gatewayProvisioner(): KitSdk.Deploy.Provisioner {
           content: {
             service: {
               image: CADDY_IMAGE,
-              ports: tls ? [`${HTTPS_HOST_PORT}:443`] : ["80:80"],
-              networks: [request.params.network, PROJECT_NETWORK],
+              ...(ingress.length === 0
+                ? { ports: [...PUBLISHED_PORTS[tls]] }
+                : {}),
+              networks: [...ingress, PROJECT_NETWORK],
               configs: [
                 { source: configName, target: "/etc/caddy/Caddyfile" },
               ],
