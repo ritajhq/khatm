@@ -2,12 +2,16 @@
   "name": "@khatm/contract",
   "exports": {
     ".": "./index.ts",
-    "./guard": "./guard.ts"
+    "./guard": "./guard.ts",
+    "./messages": "./messages.ts"
   },
   "imports": {
     "@std/assert": "jsr:@std/assert@1.0.14",
     "zod": "npm:zod@^4.1.0",
-    "@std/yaml": "jsr:@std/yaml@1.1.2"
+    "@std/yaml": "jsr:@std/yaml@1.1.2",
+    "@ritaj/horizon": "jsr:@ritaj/horizon",
+    "@ritaj/mux": "jsr:@ritaj/mux",
+    "@ritaj/storage": "jsr:@ritaj/storage"
   },
   "fmt": {
     "semiColons": false,
