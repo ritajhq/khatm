@@ -9,7 +9,7 @@ import {
 } from '@khatm-libs/ui'
 import { type FormEvent, useState } from 'react'
 import { safeReturnTo } from '@khatm/pages'
-import { authClient } from '../lib/auth-client.ts'
+import { authClient, continueAfterSignIn } from '../lib/auth-client.ts'
 import { usePage } from '../lib/context.tsx'
 import { Layout } from '../components/layout.tsx'
 import { Field } from '../components/field.tsx'
@@ -35,7 +35,7 @@ export function SignUp() {
     }
     setBusy(true)
     setFailed(undefined)
-    const { error } = await authClient.signUp.email(
+    const { data, error } = await authClient.signUp.email(
       config.username
         ? { ...fields, username: String(form.get('username') ?? '').trim() }
         : fields,
@@ -49,7 +49,7 @@ export function SignUp() {
       setMessage(t('signUp.verify'))
       return
     }
-    globalThis.location.href = returnTo
+    continueAfterSignIn(data, returnTo)
   }
 
   return (

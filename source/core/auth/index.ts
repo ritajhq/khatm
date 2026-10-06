@@ -36,3 +36,6 @@ export {
   ProtectedUserError,
   UnknownUserError,
 } from './administration.ts'
+export { OAuthClients } from './oauth-clients.ts'
+export { OAuthDiscovery } from './oauth-discovery.ts'
+export { ClientSecretHash } from './client-secret.ts'

@@ -37,6 +37,7 @@ function resolved(auth: Record<string, unknown> = {}, branding = {}) {
           redirectUris: ['https://third.example.org/cb'],
           scopes: ['openid'],
           confidential: true,
+          clientSecret: { env: 'THIRDPARTY_SECRET' },
         },
       ],
       session: {

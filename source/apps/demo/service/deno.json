@@ -1,0 +1,9 @@
+{
+  "name": "@khatm/demo-service",
+  "exports": "./main.ts",
+  "fmt": {
+    "semiColons": false,
+    "singleQuote": true,
+    "trailingCommas": "onlyMultiLine"
+  }
+}

@@ -5,6 +5,7 @@ import {
   type Manifest,
   SERVICE_USER,
 } from '@khatm/spec'
+import { OAUTH_SCOPES } from './plugins.ts'
 
 /**
  * Trusted origins, the login page's `return_to` allowlist and its landing
@@ -59,6 +60,37 @@ export const fromAdministration: Derivation = {
         },
         derivedFrom: 'khatm.administration',
       },
+    }
+  },
+}
+
+/**
+ * The OAuth provider and the signing keys it needs, once any OAuth
+ * application is declared. Better Auth's jwt plugin has its own `/token`
+ * endpoint, which the provider's `/oauth2/token` replaces, so it is turned
+ * off. Sign-in resumes on the hosted login page; consent is skipped for
+ * every client for now, so the consent page is never shown.
+ */
+export const fromOAuthApplications: Derivation = {
+  derive(manifest: Manifest): Record<string, Derived> {
+    if (!manifest.auth.applications.some((app) => app.kind === 'oauth')) {
+      return {}
+    }
+    const derivedFrom = 'auth.applications'
+    return {
+      'plugins.jwt': { value: { kind: 'jwt', options: {} }, derivedFrom },
+      'plugins.oauth-provider': {
+        value: {
+          kind: 'oauth-provider',
+          options: {
+            loginPage: '/login',
+            consentPage: '/login',
+            scopes: [...OAUTH_SCOPES],
+          },
+        },
+        derivedFrom,
+      },
+      disabledPaths: { value: ['/token'], derivedFrom },
     }
   },
 }

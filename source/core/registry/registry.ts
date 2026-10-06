@@ -10,9 +10,17 @@ import {
   fromAdministration,
   fromApplications,
   fromCookieDomain,
+  fromOAuthApplications,
 } from './derivations.ts'
 import type { PluginDefinition } from './plugin-definition.ts'
-import { admin, CORE_USER_FIELDS, username } from './plugins.ts'
+import {
+  admin,
+  CORE_USER_FIELDS,
+  jwt,
+  OAUTH_SCOPES,
+  oauthProvider,
+  username,
+} from './plugins.ts'
 
 /**
  * The plugins khatm knows how to build and the rules that expand an
@@ -70,6 +78,18 @@ export class Registry {
         }
       }
     }
+    for (const [index, app] of manifest.auth.applications.entries()) {
+      if (app.kind !== 'oauth') continue
+      for (const scope of app.scopes) {
+        if (!OAUTH_SCOPES.includes(scope)) {
+          problems.push(
+            `auth.applications.${index}.scopes: Unknown scope "${scope}"; khatm serves ${
+              OAUTH_SCOPES.join(', ')
+            }`,
+          )
+        }
+      }
+    }
     if (problems.length > 0) throw new UnresolvableManifestError(problems)
 
     const resolved = resolve(manifest, this.derivations)
@@ -118,7 +138,12 @@ export class UnresolvableManifestError extends Error {
 /** The first registry: portal's plugins and the derivations they need. */
 export function defaultRegistry(): Registry {
   return new Registry(
-    [username, admin],
-    [fromApplications, fromCookieDomain, fromAdministration],
+    [username, admin, jwt, oauthProvider],
+    [
+      fromApplications,
+      fromCookieDomain,
+      fromAdministration,
+      fromOAuthApplications,
+    ],
   )
 }

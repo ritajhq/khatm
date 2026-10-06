@@ -1,5 +1,17 @@
-# Configure each app's build kit here, e.g.:
-#
-# build:
-#   my-app:
-#     kit: deno.bundle
+build:
+  orchestrator:
+    kit: deno.bundle
+  worker:
+    kit: deno.bundle
+  cli:
+    kit: deno.bundle
+  login:
+    kit: react
+  console/web:
+    kit: react
+  console/server:
+    kit: deno.bundle
+  demo/service:
+    kit: deno.bundle
+  demo/partner:
+    kit: deno.bundle

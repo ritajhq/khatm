@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { Origin } from './origin.ts'
+import { SecretRef } from './secret.ts'
 
 export const AppId = z.string().regex(/^[a-z][a-z0-9-]*$/, {
   message:
@@ -20,14 +21,55 @@ export const FirstPartyApplication = z.object({
 }).strict()
 export type FirstPartyApplication = z.infer<typeof FirstPartyApplication>
 
-/** A third-party app that gets tokens through Better Auth's oauth-provider plugin. */
+/**
+ * Where an OAuth app may receive codes: HTTPS anywhere, or plain HTTP on a
+ * loopback host (`localhost`, `*.localhost`, `127.x.x.x`, `[::1]`) for local
+ * development. Better Auth refuses anything else at sign-in, so the manifest
+ * refuses it first.
+ */
+export const RedirectUri = z.url().refine(isAllowedRedirect, {
+  message:
+    'Must be an https URL, or http on a loopback host such as localhost or app.localhost',
+})
+
+function isAllowedRedirect(value: string): boolean {
+  const url = new URL(value)
+  if (url.protocol === 'https:') return true
+  if (url.protocol !== 'http:') return false
+  const host = url.hostname.toLowerCase()
+  return host === 'localhost' || host.endsWith('.localhost') ||
+    /^127(\.\d{1,3}){3}$/.test(host) || host === '[::1]'
+}
+
+/**
+ * An app on any origin that signs users in through khatm with OAuth 2.1 and
+ * OpenID Connect ("Login with …"). Its `id` is the OAuth `client_id`. A
+ * confidential app authenticates to the token endpoint with `clientSecret`;
+ * a public one (a browser or mobile app) has none and relies on PKCE alone.
+ */
 export const OAuthApplication = z.object({
   kind: z.literal('oauth'),
   id: AppId,
-  redirectUris: z.array(z.url()).min(1),
+  redirectUris: z.array(RedirectUri).min(1),
   scopes: z.array(z.string().min(1)),
   confidential: z.boolean(),
-}).strict()
+  clientSecret: SecretRef.optional(),
+}).strict().superRefine((app, ctx) => {
+  if (app.confidential && app.clientSecret === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['clientSecret'],
+      message: 'A confidential application needs a clientSecret',
+    })
+  }
+  if (!app.confidential && app.clientSecret !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['clientSecret'],
+      message: 'A public application has no clientSecret',
+    })
+  }
+})
 export type OAuthApplication = z.infer<typeof OAuthApplication>
 
 export const Application = z.discriminatedUnion('kind', [

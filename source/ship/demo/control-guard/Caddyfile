@@ -1,0 +1,7 @@
+# Stands in for the control API's idhn guard: every call reaches khatm as the
+# `demo` subject. Never deploy this outside the demo — it authorizes anyone.
+:8080 {
+	reverse_proxy khatm:4101 {
+		header_up X-Idhn-Subject demo
+	}
+}

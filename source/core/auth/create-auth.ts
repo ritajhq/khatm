@@ -64,6 +64,9 @@ export function createAuth(
   const trustedOrigins = resolved.derived['trustedOrigins']?.value as
     | string[]
     | undefined
+  const disabledPaths = resolved.derived['disabledPaths']?.value as
+    | string[]
+    | undefined
   const crossSubDomainCookies = resolved
     .derived['advanced.crossSubDomainCookies']?.value as
       | { enabled: boolean; domain: string }
@@ -79,6 +82,7 @@ export function createAuth(
     secrets,
     database: database.database as never,
     trustedOrigins,
+    disabledPaths,
     emailAndPassword: spec.emailAndPassword === undefined ? undefined : {
       enabled: spec.emailAndPassword.enabled,
       requireEmailVerification: spec.emailAndPassword.requireVerification,

@@ -9,7 +9,7 @@ import {
 } from '@khatm-libs/ui'
 import { type FormEvent, useState } from 'react'
 import { safeReturnTo } from '@khatm/pages'
-import { authClient } from '../lib/auth-client.ts'
+import { authClient, continueAfterSignIn } from '../lib/auth-client.ts'
 import { usePage } from '../lib/context.tsx'
 import { Layout } from '../components/layout.tsx'
 import { Field } from '../components/field.tsx'
@@ -32,7 +32,7 @@ export function SignIn() {
     const password = String(form.get('password') ?? '')
     setBusy(true)
     setFailed(false)
-    const { error } = config.username && !identifier.includes('@')
+    const { data, error } = config.username && !identifier.includes('@')
       ? await authClient.signIn.username({ username: identifier, password })
       : await authClient.signIn.email({ email: identifier, password })
     if (error) {
@@ -41,7 +41,7 @@ export function SignIn() {
       return
     }
     // The app it returns to is a separate origin: a hard navigation.
-    globalThis.location.href = returnTo
+    continueAfterSignIn(data, returnTo)
   }
 
   return (

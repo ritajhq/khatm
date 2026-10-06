@@ -276,6 +276,16 @@ function classify(
       }
     }
   }
+  if (/^auth\.applications\[[^\]]+\]$/.test(path) && removed) {
+    const kind = (before as { kind?: unknown } | undefined)?.kind
+    if (kind === 'oauth') {
+      return {
+        impact: 'destructive',
+        reason:
+          "The app's client is deleted, so it can no longer sign anyone in or refresh its tokens",
+      }
+    }
+  }
   if (
     path === 'auth.session.cookieDomain' ||
     path === 'derived[advanced.crossSubDomainCookies]'

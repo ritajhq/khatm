@@ -11,9 +11,9 @@ if (import.meta.main) {
   }
   const handler = await createConsoleHandler({
     dist: Deno.env.get('KHATM_CONSOLE_DIST') ??
-      new URL('./dist', import.meta.url).pathname,
+      new URL('../../../artifacts/console/web', import.meta.url).pathname,
     loginDist: Deno.env.get('KHATM_LOGIN_DIST') ??
-      new URL('../login/dist', import.meta.url).pathname,
+      new URL('../../../artifacts/login', import.meta.url).pathname,
     controlUrl,
   })
   Deno.serve({ port: Number(Deno.env.get('PORT') ?? '4200') }, handler)

@@ -12,11 +12,11 @@ import { createConsoleHandler } from './server.ts'
 
 const CHROMIUM = '/opt/pw-browsers/chromium'
 const here = (path: string) => new URL(path, import.meta.url).pathname
-const WORKER = here('../worker/main.ts')
+const WORKER = here('../../worker/main.ts')
 const available = [
   CHROMIUM,
-  here('./dist/index.html'),
-  here('../login/dist/index.html'),
+  here('../../../artifacts/console/web/index.html'),
+  here('../../../artifacts/login/index.html'),
 ]
   .every((path) => {
     try {
@@ -116,8 +116,8 @@ Deno.test({
     for (let i = 0; i < 2; i++) {
       consoles.push(listen(
         await createConsoleHandler({
-          dist: here('./dist'),
-          loginDist: here('../login/dist'),
+          dist: here('../../../artifacts/console/web'),
+          loginDist: here('../../../artifacts/login'),
           controlUrl: controlGuard,
         }),
       ))

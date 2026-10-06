@@ -43,7 +43,8 @@ export const Secrets = z.array(VersionedSecret).min(1).superRefine(
 
 /**
  * Every secret reference an auth spec holds, in a stable order: the signing
- * secrets, the database URL and each social provider's credentials.
+ * secrets, the database URL, each social provider's credentials and each
+ * OAuth application's client secret.
  */
 export function secretRefs(auth: {
   secrets: readonly VersionedSecret[]
@@ -51,6 +52,7 @@ export function secretRefs(auth: {
   socialProviders: Readonly<
     Record<string, { clientId: SecretRef; clientSecret: SecretRef }>
   >
+  applications?: readonly { id: string; clientSecret?: SecretRef }[]
 }): SecretRef[] {
   const refs = [
     ...auth.secrets.map((secret) => secret.value),
@@ -61,6 +63,11 @@ export function secretRefs(auth: {
       auth.socialProviders[id].clientId,
       auth.socialProviders[id].clientSecret,
     )
+  }
+  const clients = [...(auth.applications ?? [])]
+    .sort((a, b) => a.id.localeCompare(b.id))
+  for (const app of clients) {
+    if (app.clientSecret !== undefined) refs.push(app.clientSecret)
   }
   return refs
 }

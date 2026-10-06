@@ -1,0 +1,68 @@
+{
+  "bootstrap": {
+    "users": [
+      {
+        "email": "root@example.com",
+        "name": "Root",
+        "role": "admin"
+      }
+    ]
+  },
+  "auth": {
+    "baseURL": "http://auth.khatm.localhost",
+    "secrets": [
+      {
+        "version": 1,
+        "value": {
+          "env": "AUTH_SECRET"
+        }
+      }
+    ],
+    "database": {
+      "dialect": "sqlite",
+      "url": {
+        "env": "DATABASE"
+      }
+    },
+    "emailAndPassword": {
+      "enabled": true
+    },
+    "applications": [
+      {
+        "kind": "first-party",
+        "id": "console",
+        "origin": "http://console.khatm.localhost"
+      },
+      {
+        "kind": "first-party",
+        "id": "service",
+        "origin": "http://service.khatm.localhost"
+      },
+      {
+        "kind": "oauth",
+        "id": "partner",
+        "redirectUris": [
+          "http://partner.localhost/callback"
+        ],
+        "scopes": [
+          "openid",
+          "profile",
+          "email"
+        ],
+        "confidential": true,
+        "clientSecret": {
+          "env": "PARTNER_CLIENT_SECRET"
+        }
+      }
+    ],
+    "session": {
+      "cookieDomain": "khatm.localhost",
+      "introspectionURL": "http://khatm:4100/api/auth/get-session",
+      "issuer": "demo",
+      "claims": [
+        "email",
+        "name"
+      ]
+    }
+  }
+}

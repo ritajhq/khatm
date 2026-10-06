@@ -1,4 +1,9 @@
-import { Administration, createAuth } from '@khatm/auth'
+import {
+  Administration,
+  createAuth,
+  OAuthClients,
+  OAuthDiscovery,
+} from '@khatm/auth'
 import { createAdminHandler } from './admin.ts'
 import type { ResolvedManifest } from '@khatm/spec'
 import { pageConfig } from '@khatm/pages'
@@ -21,11 +26,14 @@ async function main(): Promise<void> {
   const { auth, close } = createAuth(resolved)
   const administration = new Administration(auth)
   await administration.ensureServiceUser()
+  // OAuth clients are rows, not config: bring them in line with the
+  // manifest before this worker takes any traffic.
+  await new OAuthClients(auth).sync(resolved.auth.applications)
   const origins = (resolved.derived['trustedOrigins']?.value as
     | string[]
     | undefined) ?? []
   const dist = Deno.env.get('KHATM_LOGIN_DIST') ??
-    new URL('../login/dist', import.meta.url).pathname
+    new URL('../../artifacts/login', import.meta.url).pathname
   // Headless: the service's own apps own the pages, so there are none here.
   const pages = resolved.branding.pages === 'headless'
     ? undefined
@@ -40,9 +48,12 @@ async function main(): Promise<void> {
       )
       return undefined
     })
+  const discovery = resolved.derived['plugins.oauth-provider']
+    ? new OAuthDiscovery(auth)
+    : undefined
   const server = Deno.serve(
     { port, hostname: '127.0.0.1', onListen: () => {} },
-    createHandler(auth, { origins }, pages),
+    createHandler(auth, { origins }, pages, discovery),
   )
 
   // The internal admin surface, on its own loopback port the proxy never

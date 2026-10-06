@@ -1,4 +1,4 @@
-import type { Auth } from '@khatm/auth'
+import type { Auth, OAuthDiscovery } from '@khatm/auth'
 
 /** Origins allowed to call the worker with credentials. */
 export type Cors = { readonly origins: readonly string[] }
@@ -6,7 +6,8 @@ export type Cors = { readonly origins: readonly string[] }
 const METHODS = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
 
 /**
- * The worker's HTTP surface: Better Auth under `/api/auth`, CORS for the
+ * The worker's HTTP surface: Better Auth under `/api/auth`, the OAuth
+ * provider's discovery documents when it is installed, CORS for the
  * manifest's trusted origins and nothing else. Better Auth doesn't answer
  * preflights itself, and the browser needs them for cross-origin sign-in.
  */
@@ -14,6 +15,7 @@ export function createHandler(
   auth: Pick<Auth, 'handler'>,
   cors: Cors,
   pages?: (request: Request) => Response | undefined,
+  discovery?: Pick<OAuthDiscovery, 'respond'>,
 ): (request: Request) => Promise<Response> {
   const allowed = new Set(cors.origins)
 
@@ -31,9 +33,18 @@ export function createHandler(
     })
   }
 
+  const withPublicCors = (response: Response): Response => {
+    const headers = new Headers(response.headers)
+    headers.set('access-control-allow-origin', '*')
+    return new Response(response.body, { status: response.status, headers })
+  }
+
   return async (request) => {
     const page = pages?.(request)
     if (page) return page
+    const document = discovery?.respond(request)
+    // Discovery is public metadata any client may read, from any origin.
+    if (document) return withPublicCors(await document)
     const { pathname } = new URL(request.url)
     if (pathname !== '/api/auth' && !pathname.startsWith('/api/auth/')) {
       return new Response('Not found', { status: 404 })

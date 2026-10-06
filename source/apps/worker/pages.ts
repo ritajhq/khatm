@@ -1,7 +1,7 @@
 import { type PageConfig, renderPage } from '@khatm/pages'
 
 export interface PagesOptions {
-  /** The built login app: `index.html`, `main.js`, `main.css`. */
+  /** The built login app: `index.html`, `main.js`, `index.css`. */
   readonly dist: string
   readonly config: PageConfig
   readonly tokens: Readonly<Record<string, string>>
@@ -12,7 +12,7 @@ export interface PagesOptions {
 
 const ASSETS: Readonly<Record<string, string>> = {
   'main.js': 'text/javascript; charset=utf-8',
-  'main.css': 'text/css; charset=utf-8',
+  'index.css': 'text/css; charset=utf-8',
 }
 
 /** Paths that show a page; `/` goes to the sign-in page. */

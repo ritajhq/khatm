@@ -1,0 +1,106 @@
+services:
+  console:
+    image: 'console:latest'
+    environment:
+      PORT: '4200'
+      KHATM_CONTROL_URL: 'http://control-guard:8080'
+    develop:
+      watch:
+        - path: console/server
+          target: /app/console
+          action: sync+restart
+          initial_sync: true
+        - path: console/web
+          target: /app/console/web
+          action: sync+restart
+          initial_sync: true
+        - path: login
+          target: /app/login
+          action: sync+restart
+          initial_sync: true
+  control-guard:
+    image: 'demo/control-guard:latest'
+    environment: {}
+  khatm:
+    image: 'demo/khatm:latest'
+    environment:
+      KHATM_STORE: /data/khatm.db
+      KHATM_ARTIFACTS: /data/artifacts
+      KHATM_CONTROL_PORT: '4101'
+      KHATM_MANIFEST: /config/manifest.json
+      KHATM_CONFIRM: 'true'
+      DATABASE: /data/auth.db
+      AUTH_SECRET: demo-secret-do-not-use-outside-the-demo-0123456789
+      PARTNER_CLIENT_SECRET: demo-partner-secret-do-not-use-outside-the-demo
+    volumes:
+      - 'khatm-data:/data'
+    develop:
+      watch:
+        - path: orchestrator
+          target: /app/orchestrator
+          action: sync+restart
+          initial_sync: true
+        - path: worker
+          target: /app/worker
+          action: sync+restart
+          initial_sync: true
+        - path: login
+          target: /app/login
+          action: sync+restart
+          initial_sync: true
+        - path: cli
+          target: /app/cli
+          action: sync+restart
+          initial_sync: true
+  partner:
+    image: 'demo/partner:latest'
+    environment:
+      PORT: '9200'
+      ISSUER: 'http://auth.khatm.localhost/api/auth'
+      TOKEN_URL: 'http://khatm:4100/api/auth/oauth2/token'
+      JWKS_URL: 'http://khatm:4100/api/auth/jwks'
+      USERINFO_URL: 'http://khatm:4100/api/auth/oauth2/userinfo'
+      CLIENT_ID: partner
+      CLIENT_SECRET: demo-partner-secret-do-not-use-outside-the-demo
+      REDIRECT_URI: 'http://partner.localhost/callback'
+    develop:
+      watch:
+        - path: demo/partner
+          target: /app
+          action: sync+restart
+          initial_sync: true
+  service:
+    image: 'demo/service:latest'
+    environment:
+      PORT: '9100'
+      INTROSPECTION_URL: 'http://khatm:4100/api/auth/get-session'
+      SIGN_OUT_URL: 'http://khatm:4100/api/auth/sign-out'
+      LOGIN_URL: 'http://auth.khatm.localhost/login'
+    develop:
+      watch:
+        - path: demo/service
+          target: /app
+          action: sync+restart
+          initial_sync: true
+  gateway:
+    image: 'caddy:2.11-alpine'
+    ports:
+      - '80:80'
+    networks:
+      - default
+    configs:
+      - source: gateway-caddyfile
+        target: /etc/caddy/Caddyfile
+    volumes:
+      - 'gateway-data:/data'
+    depends_on:
+      - console
+      - khatm
+      - partner
+      - service
+volumes:
+  khatm-data: {}
+  gateway-data: {}
+configs:
+  gateway-caddyfile:
+    content: "http://auth.khatm.localhost {\n\thandle /* {\n\t\treverse_proxy http://khatm:4100\n\t}\n}\n\nhttp://console.khatm.localhost {\n\thandle /* {\n\t\treverse_proxy http://console:4200\n\t}\n}\n\nhttp://service.khatm.localhost {\n\thandle /* {\n\t\treverse_proxy http://service:9100\n\t}\n}\n\nhttp://partner.localhost {\n\thandle /* {\n\t\treverse_proxy http://partner:9200\n\t}\n}\n"

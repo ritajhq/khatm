@@ -1,0 +1,156 @@
+version: v1
+
+# A self-contained khatm to try out: the auth server on SQLite, the console,
+# and a stand-in for the control API's idhn guard. The demo manifest is baked
+# into the demo/khatm image (the compose kit mounts named volumes only).
+release:
+  demo/khatm:
+    kit: docker
+    mode: image
+  demo/control-guard:
+    kit: docker
+    mode: image
+  console:
+    kit: docker
+    mode: image
+  demo/service:
+    kit: docker
+    mode: image
+  demo/partner:
+    kit: docker
+    mode: image
+
+deploy:
+  storage:
+    # The orchestrator's store, Better Auth's database and revision artifacts.
+    khatm-data:
+      type: volume
+
+  compute:
+    khatm:
+      type: container-orchestrated
+      image: ${release.demo/khatm}
+      replicas: 1
+      ports:
+        http: 4100
+        control: 4101
+      mounts:
+        - source: ${storage.khatm-data.name}
+          path: /data
+      env:
+        KHATM_STORE: /data/khatm.db
+        KHATM_ARTIFACTS: /data/artifacts
+        KHATM_CONTROL_PORT: "4101"
+        KHATM_MANIFEST: /config/manifest.json
+        KHATM_CONFIRM: "true"
+        DATABASE: /data/auth.db
+        # Demo only: a fixed secret anyone can read here.
+        AUTH_SECRET: demo-secret-do-not-use-outside-the-demo-0123456789
+        # The partner app's OAuth client secret; the partner holds the same.
+        PARTNER_CLIENT_SECRET: demo-partner-secret-do-not-use-outside-the-demo
+      development:
+        # The orchestrator holds its bundle in memory and spawns workers
+        # from theirs, so a synced build only takes effect after a restart;
+        # the restart re-applies the active revision from the volume.
+        sync+restart:
+          - app: orchestrator
+            path: /app/orchestrator
+          - app: worker
+            path: /app/worker
+          - app: login
+            path: /app/login
+          - app: cli
+            path: /app/cli
+
+    # Internal only: the console reaches the control API through it.
+    control-guard:
+      type: container-orchestrated
+      image: ${release.demo/control-guard}
+      replicas: 1
+      ports:
+        http: 8080
+
+    console:
+      type: container-orchestrated
+      image: ${release.console}
+      replicas: 1
+      ports:
+        http: 4200
+      env:
+        PORT: "4200"
+        # URL spelled out: a ${compute.*} reference bakes to a bare port.
+        KHATM_CONTROL_URL: http://control-guard:8080
+      development:
+        # It reads its pages and the login pages once, at start.
+        sync+restart:
+          - app: console/server
+            path: /app/console
+          - app: console/web
+            path: /app/console/web
+          - app: login
+            path: /app/login
+
+    # A service behind khatm: shows whether you are signed in, and what
+    # khatm tells it about you.
+    service:
+      type: container-orchestrated
+      image: ${release.demo/service}
+      replicas: 1
+      ports:
+        http: 9100
+      env:
+        PORT: "9100"
+        INTROSPECTION_URL: http://khatm:4100/api/auth/get-session
+        SIGN_OUT_URL: http://khatm:4100/api/auth/sign-out
+        LOGIN_URL: http://auth.khatm.localhost/login
+      development:
+        sync+restart:
+          - app: demo/service
+            path: /app
+
+    # A third-party site on its own domain, outside khatm's cookie: it signs
+    # users in through OAuth ("Login with Ritaj").
+    partner:
+      type: container-orchestrated
+      image: ${release.demo/partner}
+      replicas: 1
+      ports:
+        http: 9200
+      env:
+        PORT: "9200"
+        ISSUER: http://auth.khatm.localhost/api/auth
+        TOKEN_URL: http://khatm:4100/api/auth/oauth2/token
+        JWKS_URL: http://khatm:4100/api/auth/jwks
+        USERINFO_URL: http://khatm:4100/api/auth/oauth2/userinfo
+        CLIENT_ID: partner
+        CLIENT_SECRET: demo-partner-secret-do-not-use-outside-the-demo
+        REDIRECT_URI: http://partner.localhost/callback
+      development:
+        sync+restart:
+          - app: demo/partner
+            path: /app
+
+  networking:
+    gateway:
+      type: gateway
+      routes:
+        - host: auth.khatm.localhost
+          path: /*
+          target:
+            service: khatm
+            port: ${compute.khatm.http}
+        - host: console.khatm.localhost
+          path: /*
+          target:
+            service: console
+            port: ${compute.console.http}
+        - host: service.khatm.localhost
+          path: /*
+          target:
+            service: service
+            port: ${compute.service.http}
+        - host: partner.localhost
+          path: /*
+          target:
+            service: partner
+            port: ${compute.partner.http}

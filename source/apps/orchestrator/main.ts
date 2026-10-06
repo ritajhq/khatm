@@ -37,7 +37,8 @@ async function main(): Promise<void> {
   const runtime = await createRuntime({
     store,
     artifactsDirectory: Deno.env.get('KHATM_ARTIFACTS') ?? './khatm-artifacts',
-    workerEntry: new URL('../worker/main.ts', import.meta.url).pathname,
+    workerEntry: Deno.env.get('KHATM_WORKER_ENTRY') ??
+      new URL('../worker/main.ts', import.meta.url).pathname,
     onEvent: (event) => console.log(JSON.stringify(event)),
   })
 

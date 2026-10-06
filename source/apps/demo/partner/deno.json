@@ -1,0 +1,12 @@
+{
+  "name": "@khatm/demo-partner",
+  "exports": "./main.ts",
+  "fmt": {
+    "semiColons": false,
+    "singleQuote": true,
+    "trailingCommas": "onlyMultiLine"
+  },
+  "imports": {
+    "jose": "npm:jose@^6.2.3"
+  }
+}

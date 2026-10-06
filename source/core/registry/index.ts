@@ -2,9 +2,17 @@ export {
   fromAdministration,
   fromApplications,
   fromCookieDomain,
+  fromOAuthApplications,
 } from './derivations.ts'
 export type { PluginDefinition } from './plugin-definition.ts'
-export { admin, CORE_USER_FIELDS, username } from './plugins.ts'
+export {
+  admin,
+  CORE_USER_FIELDS,
+  jwt,
+  OAUTH_SCOPES,
+  oauthProvider,
+  username,
+} from './plugins.ts'
 export {
   defaultRegistry,
   Registry,

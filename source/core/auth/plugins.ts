@@ -1,5 +1,7 @@
 import type { BetterAuthPlugin } from 'better-auth'
-import { admin, username } from 'better-auth/plugins'
+import { admin, jwt, username } from 'better-auth/plugins'
+import { oauthProvider } from '@better-auth/oauth-provider'
+import { ClientSecretHash } from './client-secret.ts'
 
 type Factory = (options: Record<string, unknown>) => BetterAuthPlugin
 
@@ -12,6 +14,12 @@ type Factory = (options: Record<string, unknown>) => BetterAuthPlugin
 const FACTORIES: Readonly<Record<string, Factory>> = {
   username: (options) => username(options),
   admin: (options) => admin(options),
+  jwt: (options) => jwt(options),
+  'oauth-provider': (options) =>
+    oauthProvider({
+      ...(options as unknown as Parameters<typeof oauthProvider>[0]),
+      storeClientSecret: new ClientSecretHash(),
+    }) as unknown as BetterAuthPlugin,
 }
 
 export class UnknownPluginError extends Error {

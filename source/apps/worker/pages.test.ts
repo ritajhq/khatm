@@ -21,7 +21,7 @@ async function serve(tokens: Record<string, string> = {}) {
     '<title><!--khatm:title--></title><head><!--khatm:head--></head>',
   )
   Deno.writeTextFileSync(`${dist}/main.js`, 'console.log(1)')
-  Deno.writeTextFileSync(`${dist}/main.css`, 'body{}')
+  Deno.writeTextFileSync(`${dist}/index.css`, 'body{}')
   Deno.writeTextFileSync(`${dist}/secret.txt`, 'nope')
   const pages = await loadPages({ dist, config, tokens })
   const auth = { handler: () => Promise.resolve(new Response('auth')) }
@@ -101,7 +101,7 @@ Deno.test('pages: serves the built assets and nothing else from the directory', 
       'text/javascript; charset=utf-8',
     )
     assertEquals(await js.text(), 'console.log(1)')
-    assertEquals(await (await t.call('/_khatm/main.css')).text(), 'body{}')
+    assertEquals(await (await t.call('/_khatm/index.css')).text(), 'body{}')
     assertEquals((await t.call('/_khatm/secret.txt')).status, 404)
     assertEquals((await t.call('/_khatm/../secret.txt')).status, 404)
     assertEquals(await (await t.call('/api/auth/ok')).text(), 'auth')

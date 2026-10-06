@@ -30,7 +30,7 @@ async function sha256Base64(text: string): Promise<string> {
  * config. Used by the worker for the real pages and by the console for its
  * preview, so both render the same document.
  *
- * `assetBase` is where `main.js` and `main.css` are served from.
+ * `assetBase` is where `main.js` and `index.css` are served from.
  */
 export async function renderPage(
   template: string,

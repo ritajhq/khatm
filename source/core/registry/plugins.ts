@@ -34,3 +34,39 @@ export const admin: PluginDefinition = {
   userFields: ['role', 'banned', 'banReason', 'banExpires'],
   authorable: false,
 }
+
+/**
+ * Better Auth's `jwt` plugin: the keys OAuth tokens are signed with, and the
+ * JWKS endpoint clients verify them against. Derived whenever an OAuth
+ * application is declared.
+ */
+export const jwt: PluginDefinition = {
+  kind: 'jwt',
+  options: z.object({}).strict(),
+  userFields: [],
+  authorable: false,
+}
+
+/** The scopes khatm's OAuth provider serves; an OAuth application may ask for these only. */
+export const OAUTH_SCOPES: readonly string[] = [
+  'openid',
+  'profile',
+  'email',
+  'offline_access',
+]
+
+/**
+ * `@better-auth/oauth-provider`: khatm as an OAuth 2.1 / OpenID Connect
+ * provider, so other services can offer "Login with …". Derived whenever an
+ * OAuth application is declared; its clients come from those applications.
+ */
+export const oauthProvider: PluginDefinition = {
+  kind: 'oauth-provider',
+  options: z.object({
+    loginPage: z.string(),
+    consentPage: z.string(),
+    scopes: z.array(z.string()),
+  }).strict(),
+  userFields: [],
+  authorable: false,
+}

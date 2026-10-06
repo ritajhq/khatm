@@ -3,7 +3,7 @@ import { PageConfig, renderPage } from '@khatm/pages'
 import { BrandingSpec } from '@khatm/spec'
 
 export interface ConsoleOptions {
-  /** The built console: `index.html`, `main.js`, `main.css`. */
+  /** The built console: `index.html`, `main.js`, `index.css`. */
   readonly dist: string
   /** The built login app, for the branding preview. */
   readonly loginDist: string
@@ -21,7 +21,7 @@ const RELAYED_HEADERS = ['cookie', 'authorization', 'content-type']
 
 const TYPES: Readonly<Record<string, string>> = {
   'main.js': 'text/javascript; charset=utf-8',
-  'main.css': 'text/css; charset=utf-8',
+  'index.css': 'text/css; charset=utf-8',
 }
 
 const CONSOLE_CSP = [
