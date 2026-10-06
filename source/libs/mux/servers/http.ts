@@ -1,5 +1,7 @@
-import { Caller } from '../caller'
-import { Duplex, Packet } from '../packet'
+import { Authentication } from '../authentication.ts'
+import { Envelope } from '../envelope.ts'
+import { Duplex, Packet } from '../packet.ts'
+import { Returned } from '../returned.ts'
 
 import * as Storage from '@ritaj/storage'
 
@@ -9,7 +11,6 @@ type PromiseReject = (reason?: any) => void
 const DEFAULT_TIMEOUT_MS = 10000
 
 export type HandleOptions = {
-  caller?: Caller
   timeoutMs?: number
 }
 
@@ -22,28 +23,37 @@ interface Deferred {
 export class Server extends Duplex {
   private resolvers = new WeakMap<Packet, Deferred>()
 
-  constructor() {
+  /** `authentication` attributes each request's packet to its sender; with none configured, every sender is anonymous. */
+  constructor(private readonly authentication: Authentication = Authentication.None) {
     super()
 
     this.OnSending.Do(this.SendResponse)
   }
 
   /**
-   * Accepts the packet `req` carries, attributed to `caller` — who sent it,
-   * as whatever put this request in front of the server could tell (HTTP
-   * itself can't) — and answers with the response packet.
+   * Accepts the packet `req` carries, attributed to whoever the configured
+   * authentication says sent it, and answers with the response packet.
    */
   async Handle(
     req: Request,
-    { caller = Caller.Anonymous, timeoutMs = DEFAULT_TIMEOUT_MS }: HandleOptions = {},
+    { timeoutMs = DEFAULT_TIMEOUT_MS }: HandleOptions = {},
   ): Promise<Response> {
-    const serialized = await req.text()
-    const packet = Packet.Load(serialized)
+    const packet = await req.text().then((text) => Packet.Load(text)).catch(() => null)
 
-    packet.Attribute(caller)
-    this.Accept(packet)
+    if (packet === null) {
+      return Response.json({ error: 'not a packet' }, { status: 400 })
+    }
 
-    return new Promise<Response>((resolve, reject) => {
+    // A guard in front decides on the URL, which names the packet (see the
+    // HTTP client): one whose body is another packet would get past it as
+    // something it is not.
+    if (new URL(req.url).pathname.split('/').pop() !== Packet.Registry.Read(packet).split('/').pop()) {
+      return Response.json({ error: 'the packet is not the one the URL names' }, { status: 400 })
+    }
+
+    packet.Attribute(await this.authentication.Authenticate(new Envelope(req.headers)))
+
+    const answered = new Promise<Response>((resolve, reject) => {
       const def: Deferred = { resolve, reject }
 
       // Install timeout to avoid leaked resolvers
@@ -65,27 +75,18 @@ export class Server extends Duplex {
 
       this.resolvers.set(packet, def)
     })
+
+    this.Accept(packet)
+
+    return answered
   }
-
-  // Cancel(packet: Packet, reason?: string): boolean {
-  //   const def = this.resolvers.get(packet)
-
-  //   if (!def) return false
-
-  //   if (def.timer) {
-  //     clearTimeout(def.timer)
-  //   }
-
-  //   def.reject(new Error(reason ?? 'cancelled'))
-  //   this.resolvers.delete(packet)
-
-  //   return true
-  // }
 
   // Arrow field so it stays bound when handed to `OnSending.Do`, matching how
   // Duplex.Accept/Send bind themselves.
   private SendResponse = (p: Packet): void => {
-    const def = this.resolvers.get(p)
+    // A packet sent back undelivered answers the request that carried it.
+    const answered = p instanceof Returned ? p.Packet : p
+    const def = this.resolvers.get(answered)
 
     if (!def) {
       // No resolver found for this packet — fail-safe: ignore instead of throwing
@@ -105,6 +106,6 @@ export class Server extends Duplex {
     })
 
     def.resolve(response)
-    this.resolvers.delete(p)
+    this.resolvers.delete(answered)
   }
 }

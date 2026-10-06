@@ -1,6 +1,6 @@
 import * as Storage from '@ritaj/storage'
 
-import { Packet } from './packet'
+import { Packet } from './packet.ts'
 
 /**
  * A packet a transport could not deliver, handed back to whoever sent it —
@@ -31,6 +31,12 @@ export class Returned extends Packet {
   get Packet(): Packet {
     this.carried ??= Packet.Load(this.packet.Read())
     return this.carried
+  }
+
+  /** Shows the packet it carries as that packet shows itself, secret fields hidden — never its serialized form. */
+  override toJSON(): { type: string; data: Record<string, unknown> } {
+    const { type } = super.toJSON()
+    return { type, data: { packet: this.packet.Read() === '' ? undefined : this.Packet.toJSON() } }
   }
 }
 

@@ -4,6 +4,7 @@
   "imports": {
     "@ritaj/event": "jsr:@ritaj/event",
     "@ritaj/mux": "jsr:@ritaj/mux",
-    "@ritaj/storage": "jsr:@ritaj/storage"
+    "@ritaj/storage": "jsr:@ritaj/storage",
+    "@std/assert": "jsr:@std/assert@1.0.14"
   }
 }

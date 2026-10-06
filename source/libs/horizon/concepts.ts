@@ -1,6 +1,8 @@
 import * as MUX from '@ritaj/mux'
 import * as Storage from '@ritaj/storage'
 
+import { Fault, Unhandled } from './fault.ts'
+
 type Constructor<T> = new (...args: any[]) => T
 
 // A per-instance id used to correlate an action with its echoed response. Unlike
@@ -22,22 +24,22 @@ export type DataStructure =
   | null
   | undefined
 
-export interface Resolver<Q extends Query<DataStructure> = any> {
-  Resolve(q: Q): Promise<Q extends Query<infer R> ? R : never>
+export interface Resolver<Q extends Query<DataStructure, any> = any> {
+  Resolve(q: Q): Promise<Q extends Query<infer R, any> ? R : never>
 }
 
 /**
  * @todo Simplify types.
  */
-export abstract class AsyncResolver<Q extends AsyncQuery = any> implements Resolver<Query<AsyncResult<Q extends AsyncQuery<infer R> ? R : never>>> {
+export abstract class AsyncResolver<Q extends AsyncQuery<any, any> = any> implements Resolver<Query<AsyncResult<Q extends AsyncQuery<infer R, any> ? R : never>>> {
   abstract Submit(q: Q): Promise<string>
   abstract Execute(
     q: Q
-  ): Promise<AsyncResult<Q extends AsyncQuery<infer R> ? R : never>>
+  ): Promise<AsyncResult<Q extends AsyncQuery<infer R, any> ? R : never>>
 
   async Resolve(
     q: Q
-  ): Promise<AsyncResult<Q extends AsyncQuery<infer R> ? R : never>> {
+  ): Promise<AsyncResult<Q extends AsyncQuery<infer R, any> ? R : never>> {
     
     if (!q.IsSubmitted) {
       const handle = await this.Submit(q)
@@ -50,12 +52,57 @@ export abstract class AsyncResolver<Q extends AsyncQuery = any> implements Resol
   }
 }
 
-export interface Handler<A extends Action<any> = any> {
-  Handle(a: A): Promise<A extends Action<infer R> ? R : never>
+export interface Handler<A extends Action<any, any> = any> {
+  Handle(a: A): Promise<A extends Action<infer R, any> ? R : never>
 }
 
-export class Query<T extends DataStructure = any> extends MUX.Packet {
-  private readonly result = this.c.String('', 'query.result')
+/**
+ * What a query and a command have in common: either is answered, or ends
+ * with a fault that travels back in its place.
+ *
+ * `F` names the app faults it may end with, for typing only — `Attempt`
+ * makes the caller handle them. Nothing checks it at runtime: a resolver
+ * may still throw any fault, and the caller still gets the protocol ones.
+ */
+/**
+ * An answer as it travels: nested in the packet's JSON — never a JSON string
+ * inside it — so something reading the packet without its classes (a guard
+ * restricting what a caller may see) can address its fields. `{}` until it is
+ * answered, so answering with `null` stays distinct from not being answered.
+ */
+type Answered<T> = { value?: T }
+
+/**
+ * What the answer will be on the other side of the wire: a JSON copy, so a
+ * packet answered in-process (no transport serializing it) gives back the
+ * same plain data, never the resolver's own objects (a `Date`, a class).
+ */
+function answered<T>(data: T): Answered<T> {
+  return data === undefined ? {} : { value: JSON.parse(JSON.stringify(data)) }
+}
+
+export abstract class Message<R extends DataStructure = any, F extends Fault = never> extends MUX.Packet {
+  private readonly fault = this.c.Object<Record<string, unknown>>({}, 'horizon.fault')
+
+  /** Type-only: what this message is answered with. Never set. */
+  declare readonly Answer?: R
+  /** Type-only: the app faults this message declares. Never set. */
+  declare readonly Faults?: F
+
+  /** Ends this message with `fault` instead of an answer — for the receiving side, before it sends it back. */
+  Fail(fault: Fault) {
+    this.fault.Write(JSON.parse(fault.Serialized))
+  }
+
+  /** The fault it ended with, as the class it was thrown as. */
+  get Fault(): Fault | undefined {
+    const tree = this.fault.Read()
+    return Object.keys(tree).length === 0 ? undefined : Fault.Load(JSON.stringify(tree))
+  }
+}
+
+export class Query<out T extends DataStructure = any, F extends Fault = never> extends Message<T, F> {
+  private readonly result: Storage.Primitive<Answered<unknown>> = this.c.Object<Answered<unknown>>({}, 'query.result')
 
   async Execute(r: Resolver<this>) {
     const d = await r.Resolve(this)
@@ -63,19 +110,11 @@ export class Query<T extends DataStructure = any> extends MUX.Packet {
   }
 
   Wrap(data: T) {
-    this.result.Write(JSON.stringify(data))
+    this.result.Write(answered(data))
   }
 
   get Result(): T | undefined {
-    const raw = this.result.Read()
-
-    if (raw == null || raw === '') {
-      return undefined
-    }
-
-    const parsed = JSON.parse(raw)
-
-    return parsed as T
+    return this.result.Read().value as T | undefined
   }
 
   /**
@@ -88,43 +127,36 @@ export class Query<T extends DataStructure = any> extends MUX.Packet {
    * @param other Another Query instance
    * @returns Whether the 2 query have the same hash and constructor
    */
-  Is(other: Query): boolean {
+  Is(other: Query<any, any>): boolean {
     return this.Hash === other.Hash && this.constructor === other.constructor
   }
 
   get Hash(): string {
     const sheet = Storage.Json.Empty()
 
-    const args = this.c.Exclude('query.result')
+    const args = this.c.Exclude('query.result').Exclude('horizon.fault')
     args.Dump(sheet)
 
     return sheet.Serialized
   }
 }
 
-export class Action<R extends DataStructure = undefined> extends MUX.Packet {
+export class Action<R extends DataStructure = undefined, F extends Fault = never> extends Message<R, F> {
   // Correlates the request with its echoed response; the constructor default is
   // overwritten by Restore when the packet arrives over the wire.
   private readonly nonce = this.c.String(correlationId(), 'action.nonce')
-  private readonly result = this.c.String('', 'action.result')
+  private readonly result: Storage.Primitive<Answered<unknown>> = this.c.Object<Answered<unknown>>({}, 'action.result')
 
   async Execute(h: Handler<this>) {
     return (await h.Handle(this)) as R
   }
 
   Wrap(data: R) {
-    if (data === undefined) return
-    this.result.Write(JSON.stringify(data))
+    this.result.Write(answered(data))
   }
 
   get Result(): R | undefined {
-    const raw = this.result.Read()
-
-    if (raw == null || raw === '') {
-      return undefined
-    }
-
-    return JSON.parse(raw) as R
+    return this.result.Read().value as R | undefined
   }
 
   get Nonce(): string {
@@ -135,7 +167,7 @@ export class Action<R extends DataStructure = undefined> extends MUX.Packet {
    * Actions are matched to their echoed response by nonce (each issue is a
    * distinct request), not by content hash the way queries are.
    */
-  Is(other: Action<any>): boolean {
+  Is(other: Action<any, any>): boolean {
     return this.Nonce === other.Nonce && this.constructor === other.constructor
   }
 }
@@ -168,7 +200,7 @@ export type AsyncResult<T extends DataStructure = any> = {
  * still pending after the specified timeout.
  *
  */
-export class AsyncQuery<T extends DataStructure = any> extends Query<T> {
+export class AsyncQuery<T extends DataStructure = any, F extends Fault = never> extends Query<T, F> {
   private readonly status = this.c.String(
     AsyncStatus.Pending,
     'query.async.status'
@@ -179,8 +211,9 @@ export class AsyncQuery<T extends DataStructure = any> extends Query<T> {
     return this.status.Read() as AsyncStatus
   }
 
-  Fail() {
+  override Fail(fault?: Fault) {
     this.status.Write(AsyncStatus.Failed)
+    if (fault) super.Fail(fault)
   }
 
   Complete(data: T) {
@@ -205,20 +238,21 @@ export class AsyncQuery<T extends DataStructure = any> extends Query<T> {
     return this.handle.Read()
   }
 
-  get Hash(): string {
+  override get Hash(): string {
     const sheet = Storage.Json.Empty()
 
     const args = this.c
       .Exclude('query.result')
       .Exclude('query.async.status')
       .Exclude('query.async.handle')
+      .Exclude('horizon.fault')
 
     args.Dump(sheet)
 
     return sheet.Serialized
   }
 
-  static IsAsync(q: Query | MUX.Packet): q is AsyncQuery {
+  static IsAsync(q: Query<any, any> | MUX.Packet): q is AsyncQuery<any, any> {
     return q instanceof AsyncQuery
   }
 
@@ -232,7 +266,7 @@ export class AsyncQuery<T extends DataStructure = any> extends Query<T> {
    * @param other Another Query instance
    * @returns Whether the 2 query have the same hash and constructor
    */
-  Is(other: AsyncQuery | Query): boolean {
+  override Is(other: AsyncQuery<any, any> | Query<any, any>): boolean {
     return this.Hash === other.Hash && this.constructor === other.constructor
   }
 }
@@ -260,7 +294,7 @@ export class Resolvers implements Resolver {
     const resolver = this.registry.get(q.constructor as Constructor<Query<T>>)
 
     if (!resolver) {
-      throw new Error(`No resolver found for query ${q.constructor.name}`)
+      throw new Unhandled(`No resolver for ${MUX.Packet.Registry.Read(q)}`)
     }
 
     return resolver.Resolve(q)
@@ -269,19 +303,19 @@ export class Resolvers implements Resolver {
 
 export class Handlers implements Handler {
   constructor(
-    readonly registry = new Map<Constructor<Action<any>>, Handler>()
+    readonly registry = new Map<Constructor<Action<any, any>>, Handler>()
   ) {}
 
-  Use<A extends Action<any>>(a: Constructor<A>, h: Handler<A>): this {
+  Use<A extends Action<any, any>>(a: Constructor<A>, h: Handler<A>): this {
     this.registry.set(a, h)
     return this
   }
 
   Handle(a: Action): Promise<any> {
-    const handler = this.registry.get(a.constructor as Constructor<Action<any>>)
+    const handler = this.registry.get(a.constructor as Constructor<Action<any, any>>)
 
     if (!handler) {
-      throw new Error(`No handler found for action ${a.constructor.name}`)
+      throw new Unhandled(`No handler for ${MUX.Packet.Registry.Read(a)}`)
     }
 
     return handler.Handle(a)

@@ -3,7 +3,10 @@ import type {
   APIGatewayProxyResultV2,
 } from 'aws-lambda'
 
-import { HalfDuplex, Packet } from '../packet'
+import { Authentication } from '../authentication.ts'
+import { Envelope } from '../envelope.ts'
+import { HalfDuplex, Packet } from '../packet.ts'
+import { Returned } from '../returned.ts'
 
 import * as Storage from '@ritaj/storage'
 import * as Event from '@ritaj/event'
@@ -24,13 +27,14 @@ interface Deferred {
 export class Server extends HalfDuplex {
   private resolvers = new WeakMap<Packet, Deferred>()
 
-  constructor() {
+  /** `authentication` attributes each event's packet to its sender; with none configured, every sender is anonymous. */
+  constructor(private readonly authentication: Authentication = Authentication.None) {
     super()
 
     this.OnSending.Do(this.SendResponse)
   }
 
-  Handle(
+  async Handle(
     event: APIGatewayProxyEventV2,
     timeoutMs = DEFAULT_TIMEOUT_MS
   ): Promise<APIGatewayProxyResultV2> {
@@ -41,10 +45,9 @@ export class Server extends HalfDuplex {
       : body
 
     const packet = Packet.Load(serialized)
+    packet.Attribute(await this.authentication.Authenticate(EnvelopeOf(event)))
 
-    this.Accept(packet)
-
-    return new Promise<APIGatewayProxyResultV2>((resolve, reject) => {
+    const answered = new Promise<APIGatewayProxyResultV2>((resolve, reject) => {
       const def: Deferred = { resolve, reject }
 
       def.timer = globalThis.setTimeout(() => {
@@ -66,11 +69,17 @@ export class Server extends HalfDuplex {
 
       this.resolvers.set(packet, def)
     })
+
+    this.Accept(packet)
+
+    return answered
   }
 
   @Event.Bound
   private SendResponse(p: Packet): void {
-    const def = this.resolvers.get(p)
+    // A packet sent back undelivered answers the event that carried it.
+    const answered = p instanceof Returned ? p.Packet : p
+    const def = this.resolvers.get(answered)
 
     if (!def) {
       // No resolver found for this packet — fail-safe: ignore instead of throwing
@@ -91,6 +100,15 @@ export class Server extends HalfDuplex {
     }
 
     def.resolve(response)
-    this.resolvers.delete(p)
+    this.resolvers.delete(answered)
   }
+}
+
+/** API Gateway hands cookies over apart from the other headers; an envelope has them back in one place. */
+function EnvelopeOf(event: APIGatewayProxyEventV2): Envelope {
+  const envelope = new Envelope(
+    Object.entries(event.headers ?? {}).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  )
+  if (event.cookies?.length) envelope.SetHeader('cookie', event.cookies.join('; '))
+  return envelope
 }

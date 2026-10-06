@@ -1,39 +1,43 @@
-import type { AsyncOptions, DataStructure } from './concepts'
-import { Action, AsyncQuery, AsyncStatus, Query } from './concepts'
+import type { AsyncOptions, DataStructure, Message } from './concepts.ts'
+import { Action, AsyncQuery, AsyncStatus, Query } from './concepts.ts'
+import { Crashed, Fault, type ProtocolFault, TimedOut, Undelivered } from './fault.ts'
 
 import * as MUX from '@ritaj/mux'
 
 import * as Event from '@ritaj/event'
 
-// type Constructor<T> = new (...args: any[]) => T
 type PromiseResolver<T> = (value: T | PromiseLike<T>) => void
+type Timer = ReturnType<typeof setTimeout>
 
 export type ClientOptions = AsyncOptions
 
 /**
- * What an `Ask` or `Issue` rejects with when the transport returned its
- * packet undelivered. `Returned` says why — tell reasons apart with
- * `instanceof` (`MUX.Forbidden`, `MUX.Unauthenticated`, …).
+ * How a query or command ended, for a caller that handles its faults where
+ * it makes the call: answered with `Value`, or ended with one of the faults
+ * it declares (`F`) or a protocol one.
  */
-export class ReturnedError extends Error {
-  constructor(readonly Returned: MUX.Returned) {
-    super(`${Returned.constructor.name}: the packet was returned undelivered`)
-  }
-}
+export type Outcome<R, F extends Fault> =
+  | { readonly ok: true; readonly value: R }
+  | { readonly ok: false; readonly fault: F | ProtocolFault }
+
+/** What a query or command is answered with. */
+export type AnswerOf<M> = M extends Message<infer R, any> ? R : never
+
+/** The app faults a query or command declares. */
+export type FaultsOf<M> = M extends Message<any, infer F> ? F : never
 
 export class Client {
   private readonly queries = {
     in_flight: new Map<
       string,
-      { resolve: PromiseResolver<any>; reject: PromiseResolver<any> }
+      { resolve: PromiseResolver<any>; reject: (fault: Fault) => void }
     >(),
-    timeouts: new Map<string, NodeJS.Timeout>(),
-    intervals: new Map<string, NodeJS.Timeout>(),
+    timeouts: new Map<string, Timer>(),
+    intervals: new Map<string, Timer>(),
   }
 
-  readonly onError = new Event.Delegate<[error: Error]>()
-
   private readonly returned = new Event.Delegate<[MUX.Returned]>()
+  private readonly faulted = new Event.Delegate<[Fault]>()
 
   constructor(
     private readonly transport: MUX.Receiver & MUX.Sender,
@@ -45,33 +49,44 @@ export class Client {
 
   /**
    * Every packet this client sent that came back undelivered — for handling
-   * a reason the same way wherever it happens (e.g. signing in again on
-   * `MUX.Unauthenticated`). The `Ask` or `Issue` that sent it rejects too.
+   * a reason the same way wherever it happens. The `Ask` or `Issue` that sent
+   * it rejects too, with `Undelivered`.
    */
   get OnReturned(): Event.Emitter<[MUX.Returned]> {
     return this.returned
   }
 
-  Ask<R extends DataStructure>(q: Query<R>, opts?: AsyncOptions): Promise<R>
+  /**
+   * Every fault any query or command ended with, app or protocol — for
+   * reacting to them in one place (logging, a notice for `Crashed`). The call
+   * that made it still rejects with it, or returns it from `Attempt`.
+   */
+  get OnFault(): Event.Emitter<[Fault]> {
+    return this.faulted
+  }
+
+  Ask<R extends DataStructure>(q: Query<R, any>, opts?: AsyncOptions): Promise<R>
   Ask<R extends DataStructure>(
-    q: AsyncQuery<R>,
+    q: AsyncQuery<R, any>,
     opts?: AsyncOptions
   ): Promise<R>
   Ask<R extends DataStructure>(
-    q: Query<R> | AsyncQuery<R>,
+    q: Query<R, any> | AsyncQuery<R, any>,
     opts: AsyncOptions = {}
   ): Promise<R> {
     const timeout = opts.timeout ?? this.options.timeout ?? 10_000
     const interval = opts.interval ?? this.options.interval ?? 1_500
 
-    return new Promise<R>((resolve, reject) => {
+    return new Promise<R>((resolve, rejectWith) => {
+      const reject = (fault: Fault) => this.Reject(rejectWith, fault)
+
       if (AsyncQuery.IsAsync(q)) {
-        const unreturned = this.WhenReturned((p) => p instanceof AsyncQuery && q.Is(p), (error) => {
+        const unreturned = this.WhenReturned((p) => p instanceof AsyncQuery && q.Is(p), (fault) => {
           answered.Dispose()
           this.queries.in_flight.delete(q.Hash)
           clearTimeout(this.queries.timeouts.get(q.Hash))
           clearInterval(this.queries.intervals.get(q.Hash))
-          reject(error)
+          reject(fault)
         })
 
         const answered = this.transport.OnReceving.Do((received, event) => {
@@ -87,11 +102,11 @@ export class Client {
               case AsyncStatus.Failed: {
                 event.Dispose()
                 unreturned.Dispose()
-                return reject(new Error('Async query failed'))
+                return reject(received.Fault ?? new Crashed())
               }
 
               case AsyncStatus.Pending:
-              default:
+              default: {
                 if (this.queries.in_flight.has(q.Hash)) return
 
                 this.queries.in_flight.set(q.Hash, { resolve, reject })
@@ -104,13 +119,14 @@ export class Client {
                   this.queries.in_flight.delete(q.Hash)
                   clearInterval(intervalId)
                   unreturned.Dispose()
-                  reject(new Error('Async query timed out'))
+                  reject(new TimedOut('The async query was still pending when it timed out'))
                 }, timeout)
 
                 this.queries.intervals.set(q.Hash, intervalId)
                 this.queries.timeouts.set(q.Hash, timer)
 
                 return
+              }
             }
           }
         })
@@ -122,12 +138,12 @@ export class Client {
       // Plain queries have no submit/poll cycle, but the transport can still
       // fail (bad response, network error) without ever echoing a matching
       // packet back — without a timeout this promise would hang forever.
-      let timer: ReturnType<typeof setTimeout>
+      let timer: Timer
 
-      const unreturned = this.WhenReturned((p) => p instanceof Query && q.Is(p), (error) => {
+      const unreturned = this.WhenReturned((p) => p instanceof Query && q.Is(p), (fault) => {
         subscription.Dispose()
         clearTimeout(timer)
-        reject(error)
+        reject(fault)
       })
 
       const subscription = this.transport.OnReceving.Do((received, event) => {
@@ -136,7 +152,7 @@ export class Client {
             event.Dispose()
             unreturned.Dispose()
             clearTimeout(timer)
-            return resolve(received.Result)
+            this.Settle(received, resolve, reject)
           }
         }
       })
@@ -144,7 +160,7 @@ export class Client {
       timer = setTimeout(() => {
         subscription.Dispose()
         unreturned.Dispose()
-        reject(new Error('Query timed out'))
+        reject(new TimedOut('The query timed out'))
       }, timeout)
 
       q.SendWith(this.transport)
@@ -156,16 +172,17 @@ export class Client {
    * back with its result wrapped; we match the echo by nonce (via `Is`) and
    * resolve with the payload, rejecting on timeout.
    */
-  Issue<R extends DataStructure>(a: Action<R>, opts: AsyncOptions = {}): Promise<R> {
+  Issue<R extends DataStructure>(a: Action<R, any>, opts: AsyncOptions = {}): Promise<R> {
     const timeout = opts.timeout ?? this.options.timeout ?? 10_000
 
-    return new Promise<R>((resolve, reject) => {
-      let timer: ReturnType<typeof setTimeout>
+    return new Promise<R>((resolve, rejectWith) => {
+      const reject = (fault: Fault) => this.Reject(rejectWith, fault)
+      let timer: Timer
 
-      const unreturned = this.WhenReturned((p) => p instanceof Action && a.Is(p), (error) => {
+      const unreturned = this.WhenReturned((p) => p instanceof Action && a.Is(p), (fault) => {
         subscription.Dispose()
         clearTimeout(timer)
-        reject(error)
+        reject(fault)
       })
 
       const subscription = this.transport.OnReceving.Do((received, event) => {
@@ -173,24 +190,70 @@ export class Client {
           event.Dispose()
           unreturned.Dispose()
           clearTimeout(timer)
-          resolve(received.Result as R)
+          this.Settle(received, resolve, reject)
         }
       })
 
       timer = setTimeout(() => {
         subscription.Dispose()
         unreturned.Dispose()
-        reject(new Error('Action timed out'))
+        reject(new TimedOut('The action timed out'))
       }, timeout)
 
       a.SendWith(this.transport)
     })
   }
 
+  /**
+   * Asks the query or issues the command, and hands back how it ended
+   * instead of rejecting: the compiler then makes the caller handle the
+   * faults it declares.
+   */
+  async Attempt<M extends Message<any, any>>(
+    m: M,
+    opts: AsyncOptions = {}
+  ): Promise<Outcome<AnswerOf<M>, FaultsOf<M>>> {
+    try {
+      return { ok: true, value: await this.Dispatch(m, opts) }
+    } catch (error) {
+      if (error instanceof Fault) return { ok: false, fault: error as FaultsOf<M> | ProtocolFault }
+      throw error
+    }
+  }
+
+  /**
+   * Asks it if it is a query, issues it if it is a command — for code that
+   * handles messages without knowing which kind each is. Rejects as `Ask`
+   * and `Issue` do.
+   */
+  Dispatch<M extends Message<any, any>>(m: M, opts: AsyncOptions = {}): Promise<AnswerOf<M>> {
+    return m instanceof Action
+      ? this.Issue(m, opts)
+      : this.Ask(m as unknown as Query<any, any>, opts)
+  }
+
   Listen<T extends MUX.Packet>(type: Event.Constructor<T>, cb: (p: T) => void): Event.Disposable {
     return this.transport.OnReceving.Do(packet => {
       if (packet instanceof type) cb(packet as T)
     })
+  }
+
+  /** Resolves with the answer `received` carries, or rejects with the fault it ended with. */
+  private Settle<R>(
+    received: Query<any, any> | Action<any, any>,
+    resolve: PromiseResolver<R>,
+    reject: (fault: Fault) => void
+  ): void {
+    const fault = received.Fault
+    if (fault) return reject(fault)
+
+    resolve(received.Result as R)
+  }
+
+  /** Every fault goes through here, so `OnFault` sees each one the caller does. */
+  private Reject(reject: (reason: Fault) => void, fault: Fault): void {
+    this.faulted.Invoke(fault)
+    reject(fault)
   }
 
   /**
@@ -200,14 +263,14 @@ export class Client {
    */
   private WhenReturned(
     isSent: (packet: MUX.Packet) => boolean,
-    returned: (error: ReturnedError) => void
+    returned: (fault: Undelivered) => void
   ): Event.Disposable {
     return this.transport.OnReceving.Do((received, event) => {
       if (!(received instanceof MUX.Returned)) return
       if (!isSent(received.Packet)) return
 
       event.Dispose()
-      returned(new ReturnedError(received))
+      returned(new Undelivered(received))
     })
   }
 
@@ -231,7 +294,7 @@ export class Client {
         return
 
       case AsyncStatus.Failed:
-        deferred.reject(new Error('Async query failed'))
+        deferred.reject(p.Fault ?? new Crashed())
         this.queries.in_flight.delete(p.Hash)
         clearTimeout(this.queries.timeouts.get(p.Hash))
         clearInterval(this.queries.intervals.get(p.Hash))

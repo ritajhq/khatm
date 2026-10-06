@@ -1,5 +1,6 @@
-import { Duplex, Packet } from '../packet'
-import { Failed, Forbidden, Returned, Unauthenticated, Unavailable, Unreachable } from '../returned'
+import { Courier } from '../courier.ts'
+import { Packet } from '../packet.ts'
+import { Failed, Forbidden, Returned, Unauthenticated, Unavailable, Unreachable } from '../returned.ts'
 
 import * as Storage from '@ritaj/storage'
 
@@ -12,7 +13,7 @@ const RETURNED_FOR_STATUS: Readonly<Record<number, new (packet: Packet) => Retur
   504: Unavailable,
 }
 
-export class Client extends Duplex {
+export class Client extends Courier {
   constructor(readonly endpoint: string) {
     super()
 
@@ -37,9 +38,12 @@ export class Client extends Duplex {
 
     const url = `${this.endpoint}/${name}`
 
+    const headers = new Headers({ 'Content-Type': 'application/json' })
+    this.EnvelopeFor(p).WriteTo(headers)
+
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: sheet.Serialized,
     }).catch(() => null)
 
