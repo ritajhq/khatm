@@ -1,0 +1,9 @@
+{
+  "name": "@ritaj/horizon",
+  "exports": "./index.ts",
+  "imports": {
+    "@ritaj/event": "jsr:@ritaj/event",
+    "@ritaj/mux": "jsr:@ritaj/mux",
+    "@ritaj/storage": "jsr:@ritaj/storage"
+  }
+}
