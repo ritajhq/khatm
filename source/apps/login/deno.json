@@ -7,7 +7,10 @@
     "react": "npm:react@19.2.0",
     "react-dom": "npm:react-dom@19.2.0",
     "react-dom/client": "npm:react-dom@19.2.0/client",
-    "@better-auth/oauth-provider/client": "npm:@better-auth/oauth-provider@1.7.6/client"
+    "@better-auth/oauth-provider/client": "npm:@better-auth/oauth-provider@1.7.6/client",
+    "class-variance-authority": "npm:class-variance-authority@0.7.1",
+    "clsx": "npm:clsx@2.1.1",
+    "tailwind-merge": "npm:tailwind-merge@3.3.1"
   },
   "compilerOptions": {
     "jsx": "react-jsx",

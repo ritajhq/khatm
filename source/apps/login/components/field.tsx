@@ -1,5 +1,5 @@
 import type { InputHTMLAttributes } from 'react'
-import { Input, Label } from '@khatm-libs/ui'
+import { Input, Label } from './ui/index.ts'
 
 export function Field(
   { label, id, ...props }:

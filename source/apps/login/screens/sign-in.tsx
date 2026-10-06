@@ -6,7 +6,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from '@khatm-libs/ui'
+} from '../components/ui/index.ts'
 import { type FormEvent, useState } from 'react'
 import { safeReturnTo } from '@khatm/pages'
 import { authClient, continueAfterSignIn } from '../lib/auth-client.ts'

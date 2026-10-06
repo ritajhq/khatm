@@ -5,7 +5,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from '@khatm-libs/ui'
+} from '../components/ui/index.ts'
 import type { MessageId } from '@khatm/pages'
 import { usePage } from '../lib/context.tsx'
 import { Layout } from '../components/layout.tsx'
