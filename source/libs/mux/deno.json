@@ -1,0 +1,16 @@
+{
+  "name": "@ritaj/mux",
+  "exports": {
+    ".": "./index.ts",
+    "./client/http": "./clients/http.ts",
+    "./client/ws": "./clients/ws.ts",
+    "./server/http": "./servers/http.ts",
+    "./server/ws": "./servers/ws.ts",
+    "./server/lambda": "./servers/lambda.ts"
+  },
+  "imports": {
+    "@ritaj/event": "jsr:@ritaj/event",
+    "@ritaj/storage": "jsr:@ritaj/storage",
+    "aws-lambda": "npm:@types/aws-lambda@8.10.160"
+  }
+}
