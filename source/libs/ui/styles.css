@@ -1,4 +1,4 @@
-/* Generated from the @fluid registry by vendor.py: the tokens, surfaces, type scale
+/* Generated from the @fluid registry by vendor.ts: the tokens, surfaces, type scale
    and keyframes Fluid components rely on. Imported by each app's index.css. */
 
 @custom-variant dark (@media (prefers-color-scheme: dark));

@@ -1,5 +1,5 @@
 // Not generated: the icon set this kit uses in place of Fluid's Lucide
-// default, Untitled UI (which Fluid Functionalism prefers). vendor.py points
+// default, Untitled UI (which Fluid Functionalism prefers). vendor.ts points
 // icon-context.tsx at this map, so re-vendoring keeps it.
 //
 // Every role keeps its meaning; where Untitled UI has no glyph of that name
