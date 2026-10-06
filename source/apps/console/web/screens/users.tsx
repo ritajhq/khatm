@@ -1,48 +1,55 @@
-import { type FormEvent, useEffect, useState } from 'react'
-import type { UserDetail, UserView } from '@khatm/contract'
+import { type FormEvent, type ReactNode, useState } from 'react'
+import type { UserView } from '@khatm/contract'
+import { Calls } from '@khatm/contract/messages'
 import {
-  Alert,
   Badge,
   Button,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  cn,
-  Input,
-  Label,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  InputField,
+  InputGroup,
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
+  useIcon,
 } from '@khatm-libs/ui'
-import { api, describeError } from '../api.ts'
+import { Describe } from '../control.ts'
+import { useControl } from '../control-provider.tsx'
+import { Notice } from '../components/notice.tsx'
+import { Panel } from '../components/panel.tsx'
+import { useCall } from '../use-call.ts'
 
 const PAGE = 25
 
 /** The data plane: who uses auth. Every change goes through the control API and lands in the audit log. */
 export function Users({ refresh }: { refresh: number }) {
+  const control = useControl()
+  const PlusIcon = useIcon('plus')
+  const SearchIcon = useIcon('search')
   const [search, setSearch] = useState('')
   const [query, setQuery] = useState('')
   const [offset, setOffset] = useState(0)
-  const [page, setPage] = useState<{ users: UserView[]; total: number }>()
   const [selected, setSelected] = useState<string | undefined>()
   const [creating, setCreating] = useState(false)
-  const [error, setError] = useState<string | undefined>()
   const [reload, setReload] = useState(0)
-
-  useEffect(() => {
-    api.listUsers({
-      search: query || undefined,
-      limit: PAGE,
-      offset,
-    })
-      .then(setPage)
-      .catch((e) => setError(describeError(e)))
-  }, [query, offset, refresh, reload])
-
+  const page = useCall(
+    () =>
+      control.Send(
+        new Calls.listUsers({
+          search: query || undefined,
+          limit: PAGE,
+          offset,
+        }),
+      ),
+    [query, offset, refresh, reload],
+  )
   const changed = () => setReload((n) => n + 1)
 
   function onSearch(event: FormEvent) {
@@ -53,100 +60,103 @@ export function Users({ refresh }: { refresh: number }) {
 
   return (
     <div className='grid gap-6 lg:grid-cols-[1fr_24rem]'>
-      <Card>
-        <CardHeader className='flex flex-row items-center justify-between text-left'>
-          <CardTitle className='text-base'>Users</CardTitle>
-          <Button size='sm' variant='outline' onClick={() => setCreating(true)}>
+      <Panel
+        title='Users'
+        description='Search by email, then pick someone to manage them.'
+        action={
+          <Button
+            className='shrink-0'
+            variant='secondary'
+            size='compact'
+            leadingIcon={PlusIcon}
+            onClick={() => setCreating(true)}
+          >
             New user
           </Button>
-        </CardHeader>
-        <CardContent className='grid gap-4'>
-          {error && <Alert tone='destructive'>{error}</Alert>}
-          {creating && (
-            <CreateUser
-              onDone={(id) => {
-                setCreating(false)
-                if (id) {
-                  setSelected(id)
-                  changed()
-                }
-              }}
-            />
-          )}
-          <form className='flex gap-2' onSubmit={onSearch}>
-            <Input
-              aria-label='Search by email'
+        }
+      >
+        {page.error && <Notice tone='error'>{page.error}</Notice>}
+        <form className='flex items-end gap-2' onSubmit={onSearch}>
+          <InputGroup className='min-w-0 flex-1'>
+            <InputField
+              index={0}
+              label='Search by email'
+              labelHidden
               placeholder='Search by email'
+              icon={SearchIcon}
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={setSearch}
             />
-            <Button type='submit' variant='outline'>Search</Button>
-          </form>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>User</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Joined</TableHead>
+          </InputGroup>
+          <Button type='submit' className='shrink-0' variant='secondary'>
+            Search
+          </Button>
+        </form>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>User</TableHead>
+              <TableHead>Role</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Joined</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {page.value?.users.map((user, i) => (
+              <TableRow
+                key={user.id}
+                index={i}
+                aria-selected={user.id === selected}
+                className='cursor-pointer aria-selected:bg-selected'
+                onClick={() => setSelected(user.id)}
+              >
+                <TableCell>
+                  <div className='font-medium text-foreground'>{user.name}</div>
+                  <div>{user.email}</div>
+                </TableCell>
+                <TableCell>{user.role}</TableCell>
+                <TableCell>
+                  <UserStatus user={user} />
+                </TableCell>
+                <TableCell>
+                  {new Date(user.createdAt).toLocaleDateString()}
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {page?.users.map((user) => (
-                <TableRow
-                  key={user.id}
-                  className={cn(
-                    'cursor-pointer',
-                    user.id === selected && 'bg-muted',
-                  )}
-                  onClick={() => setSelected(user.id)}
-                >
-                  <TableCell>
-                    <div className='font-medium'>{user.name}</div>
-                    <div className='text-muted-foreground'>{user.email}</div>
-                  </TableCell>
-                  <TableCell>{user.role}</TableCell>
-                  <TableCell>
-                    <UserStatus user={user} />
-                  </TableCell>
-                  <TableCell>
-                    {new Date(user.createdAt).toLocaleDateString()}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          {page && (
-            <div className='flex items-center justify-between text-sm text-muted-foreground'>
-              <span>
-                {page.total === 0
-                  ? 'No users'
-                  : `${offset + 1}–${
-                    offset + page.users.length
-                  } of ${page.total}`}
-              </span>
-              <div className='flex gap-2'>
-                <Button
-                  size='sm'
-                  variant='outline'
-                  disabled={offset === 0}
-                  onClick={() => setOffset(Math.max(0, offset - PAGE))}
-                >
-                  Previous
-                </Button>
-                <Button
-                  size='sm'
-                  variant='outline'
-                  disabled={offset + PAGE >= page.total}
-                  onClick={() => setOffset(offset + PAGE)}
-                >
-                  Next
-                </Button>
-              </div>
+            ))}
+          </TableBody>
+        </Table>
+        {page.value && (
+          <div className='flex items-center justify-between text-body text-muted-foreground'>
+            <span>
+              {page.value.total === 0
+                ? 'No users'
+                : `${offset + 1}–${
+                  offset + page.value.users.length
+                } of ${page.value.total}`}
+            </span>
+            <div className='flex gap-2'>
+              <Button
+                className='shrink-0'
+                variant='ghost'
+                size='compact'
+                disabled={offset === 0}
+                onClick={() => setOffset(Math.max(0, offset - PAGE))}
+              >
+                Previous
+              </Button>
+              <Button
+                className='shrink-0'
+                variant='ghost'
+                size='compact'
+                disabled={offset + PAGE >= page.value.total}
+                onClick={() => setOffset(offset + PAGE)}
+              >
+                Next
+              </Button>
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </div>
+        )}
+      </Panel>
       {selected && (
         <UserPanel
           key={selected}
@@ -158,17 +168,31 @@ export function Users({ refresh }: { refresh: number }) {
           }}
         />
       )}
+      <CreateUser
+        open={creating}
+        onDone={(id) => {
+          setCreating(false)
+          if (!id) return
+          setSelected(id)
+          changed()
+        }}
+      />
     </div>
   )
 }
 
 function UserStatus({ user }: { user: UserView }) {
-  if (user.banned) return <Badge variant='destructive'>Banned</Badge>
-  if (!user.emailVerified) return <Badge variant='outline'>Unverified</Badge>
-  return <Badge variant='secondary'>Active</Badge>
+  if (user.banned) return <Badge color='red'>Banned</Badge>
+  if (!user.emailVerified) {
+    return <Badge variant='dot' color='amber'>Unverified</Badge>
+  }
+  return <Badge color='green'>Active</Badge>
 }
 
-function CreateUser({ onDone }: { onDone(id?: string): void }) {
+function CreateUser(
+  { open, onDone }: { open: boolean; onDone(id?: string): void },
+) {
+  const control = useControl()
   const [email, setEmail] = useState('')
   const [name, setName] = useState('')
   const [role, setRole] = useState('')
@@ -177,66 +201,81 @@ function CreateUser({ onDone }: { onDone(id?: string): void }) {
   async function submit(event: FormEvent) {
     event.preventDefault()
     try {
-      const { user } = await api.createUser({
-        email,
-        name,
-        role: role || undefined,
-      })
+      const { user } = await control.Send(
+        new Calls.createUser({ email, name, role: role || undefined }),
+      )
+      setEmail('')
+      setName('')
+      setRole('')
       onDone(user.id)
     } catch (e) {
-      setError(describeError(e))
+      setError(Describe(e))
     }
   }
 
   return (
-    <form className='grid gap-3 rounded-lg border p-4' onSubmit={submit}>
-      {error && <Alert tone='destructive'>{error}</Alert>}
-      <div className='grid grid-cols-3 gap-3'>
-        <div className='grid gap-1.5'>
-          <Label htmlFor='new-email'>Email</Label>
-          <Input
-            id='new-email'
-            type='email'
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-        </div>
-        <div className='grid gap-1.5'>
-          <Label htmlFor='new-name'>Name</Label>
-          <Input
-            id='new-name'
-            required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-        </div>
-        <div className='grid gap-1.5'>
-          <Label htmlFor='new-role'>Role</Label>
-          <Input
-            id='new-role'
-            placeholder='user'
-            value={role}
-            onChange={(e) => setRole(e.target.value)}
-          />
-        </div>
+    <Dialog open={open} onOpenChange={(next) => !next && onDone()}>
+      <DialogContent>
+        <form className='grid gap-4' onSubmit={submit}>
+          <DialogHeader>
+            <DialogTitle>New user</DialogTitle>
+            <DialogDescription>
+              The user has no password until you set one or they sign in with a
+              provider.
+            </DialogDescription>
+          </DialogHeader>
+          {error && <Notice tone='error'>{error}</Notice>}
+          <InputGroup>
+            <InputField
+              index={0}
+              label='Email'
+              type='email'
+              required
+              value={email}
+              onChange={setEmail}
+            />
+            <InputField
+              index={1}
+              label='Name'
+              required
+              value={name}
+              onChange={setName}
+            />
+            <InputField
+              index={2}
+              label='Role'
+              placeholder='user'
+              value={role}
+              onChange={setRole}
+            />
+          </InputGroup>
+          <DialogFooter>
+            <Button type='button' variant='secondary' onClick={() => onDone()}>
+              Cancel
+            </Button>
+            <Button type='submit' variant='primary'>Create</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function Section(
+  { title, action, children }: {
+    title: string
+    action?: ReactNode
+    children: ReactNode
+  },
+) {
+  return (
+    <section className='grid grid-cols-1 gap-2'>
+      <div className='flex items-center justify-between'>
+        <h3 className='text-subtitle font-medium text-foreground'>{title}</h3>
+        {action}
       </div>
-      <p className='text-xs text-muted-foreground'>
-        The user has no password until you set one or they sign in with a
-        provider.
-      </p>
-      <div className='flex gap-2'>
-        <Button type='submit' size='sm'>Create</Button>
-        <Button
-          type='button'
-          size='sm'
-          variant='outline'
-          onClick={() => onDone()}
-        >
-          Cancel
-        </Button>
-      </div>
-    </form>
+      {children}
+    </section>
   )
 }
 
@@ -247,25 +286,16 @@ function UserPanel(
     onRemoved(): void
   },
 ) {
-  const [detail, setDetail] = useState<UserDetail | undefined>()
+  const control = useControl()
+  const detail = useCall(() => control.Send(new Calls.getUser({ user: id })), [
+    id,
+  ])
   const [error, setError] = useState<string | undefined>()
   const [message, setMessage] = useState<string | undefined>()
   const [reason, setReason] = useState('')
-  const [role, setRole] = useState('')
+  const [role, setRole] = useState<string | undefined>()
   const [password, setPassword] = useState('')
   const [confirmRemove, setConfirmRemove] = useState(false)
-
-  const load = () =>
-    api.getUser({ user: id })
-      .then((d) => {
-        setDetail(d)
-        setRole(d.user.role ?? '')
-      })
-      .catch((e) => setError(describeError(e)))
-
-  useEffect(() => {
-    load()
-  }, [id])
 
   /** Runs one change, then reloads this user and the list. */
   async function act(done: string, change: () => Promise<unknown>) {
@@ -274,231 +304,267 @@ function UserPanel(
     try {
       await change()
       setMessage(done)
-      await load()
+      detail.reload()
       onChanged()
     } catch (e) {
-      setError(describeError(e))
+      setError(Describe(e))
     }
   }
 
-  if (!detail) {
-    return error ? <Alert tone='destructive'>{error}</Alert> : null
+  if (!detail.value) {
+    return detail.error ? <Notice tone='error'>{detail.error}</Notice> : null
   }
-  const { user, sessions, accounts } = detail
+  const { user, sessions, accounts } = detail.value
+  const typedRole = role ?? user.role ?? ''
 
   return (
-    <Card aria-label={`User ${user.email}`}>
-      <CardHeader className='text-left'>
-        <CardTitle className='text-base'>{user.name}</CardTitle>
-        <p className='text-sm text-muted-foreground'>{user.email}</p>
+    <Panel
+      label={`User ${user.email}`}
+      title={user.name}
+      description={user.email}
+      action={
         <div className='flex gap-2'>
           <UserStatus user={user} />
-          {user.username && <Badge variant='outline'>@{user.username}</Badge>}
+          {user.username && <Badge variant='dot'>@{user.username}</Badge>}
         </div>
-      </CardHeader>
-      <CardContent className='grid gap-5 text-sm'>
-        {error && <Alert tone='destructive'>{error}</Alert>}
-        {message && <Alert>{message}</Alert>}
+      }
+    >
+      {error && <Notice tone='error'>{error}</Notice>}
+      {message && <Notice tone='success'>{message}</Notice>}
 
-        <section className='grid gap-2'>
-          <h3 className='font-medium'>Role</h3>
-          <div className='flex gap-2'>
-            <Input
-              aria-label='Role'
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
+      <Section title='Role'>
+        <div className='flex items-end gap-2'>
+          <InputGroup className='min-w-0 flex-1'>
+            <InputField
+              index={0}
+              label='Role'
+              labelHidden
+              value={typedRole}
+              onChange={setRole}
             />
-            <Button
-              variant='outline'
-              disabled={!role || role === user.role}
-              onClick={() =>
-                act(
-                  `Role set to ${role}`,
-                  () => api.setRole({ user: id, role }),
-                )}
-            >
-              Set role
-            </Button>
-          </div>
-        </section>
+          </InputGroup>
+          <Button
+            className='shrink-0'
+            variant='secondary'
+            disabled={!typedRole || typedRole === user.role}
+            onClick={() =>
+              act(`Role set to ${typedRole}`, () =>
+                control.Send(new Calls.setRole({ user: id, role: typedRole })))}
+          >
+            Set role
+          </Button>
+        </div>
+      </Section>
 
-        <section className='grid gap-2'>
-          <h3 className='font-medium'>Access</h3>
-          {user.banned
-            ? (
-              <div className='grid gap-2'>
-                <p className='text-muted-foreground'>
-                  Banned{user.banReason ? `: ${user.banReason}` : ''}
-                  {user.banExpires &&
-                    `, until ${new Date(user.banExpires).toLocaleString()}`}
-                </p>
-                <Button
-                  variant='outline'
-                  onClick={() =>
-                    act('Unbanned', () => api.unbanUser({ user: id }))}
-                >
-                  Unban
-                </Button>
-              </div>
-            )
-            : (
-              <div className='flex gap-2'>
-                <Input
-                  aria-label='Ban reason'
+      <Section title='Access'>
+        {user.banned
+          ? (
+            <div className='grid gap-2'>
+              <p className='text-body text-muted-foreground'>
+                Banned{user.banReason ? `: ${user.banReason}` : ''}
+                {user.banExpires &&
+                  `, until ${new Date(user.banExpires).toLocaleString()}`}
+              </p>
+              <Button
+                className='shrink-0'
+                variant='secondary'
+                onClick={() =>
+                  act(
+                    'Unbanned',
+                    () => control.Send(new Calls.unbanUser({ user: id })),
+                  )}
+              >
+                Unban
+              </Button>
+            </div>
+          )
+          : (
+            <div className='flex items-end gap-2'>
+              <InputGroup className='min-w-0 flex-1'>
+                <InputField
+                  index={0}
+                  label='Ban reason'
+                  labelHidden
                   placeholder='Reason (optional)'
                   value={reason}
-                  onChange={(e) => setReason(e.target.value)}
+                  onChange={setReason}
                 />
-                <Button
-                  variant='outline'
-                  onClick={() =>
-                    act('Banned and signed out', () =>
-                      api.banUser({
-                        user: id,
-                        reason: reason || undefined,
-                      }))}
-                >
-                  Ban
-                </Button>
-              </div>
-            )}
-          {!user.emailVerified && (
-            <Button
-              variant='outline'
-              onClick={() =>
-                act(
-                  'Email marked verified',
-                  () => api.verifyEmail({ user: id }),
-                )}
-            >
-              Mark email verified
-            </Button>
+              </InputGroup>
+              <Button
+                className='shrink-0'
+                variant='secondary'
+                onClick={() =>
+                  act(
+                    'Banned and signed out',
+                    () =>
+                      control.Send(
+                        new Calls.banUser({
+                          user: id,
+                          reason: reason || undefined,
+                        }),
+                      ),
+                  )}
+              >
+                Ban
+              </Button>
+            </div>
           )}
-          <div className='flex gap-2'>
-            <Input
-              aria-label='New password'
+        {!user.emailVerified && (
+          <Button
+            className='shrink-0'
+            variant='secondary'
+            onClick={() =>
+              act(
+                'Email marked verified',
+                () => control.Send(new Calls.verifyEmail({ user: id })),
+              )}
+          >
+            Mark email verified
+          </Button>
+        )}
+        <div className='flex items-end gap-2'>
+          <InputGroup className='min-w-0 flex-1'>
+            <InputField
+              index={0}
+              label='New password'
+              labelHidden
               type='password'
               autoComplete='new-password'
               placeholder='New password'
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={setPassword}
             />
+          </InputGroup>
+          <Button
+            className='shrink-0'
+            variant='secondary'
+            disabled={!password}
+            onClick={() =>
+              act('Password set', async () => {
+                await control.Send(
+                  new Calls.setPassword({ user: id, password }),
+                )
+                setPassword('')
+              })}
+          >
+            Set password
+          </Button>
+        </div>
+      </Section>
+
+      <Section title='Sign-in methods'>
+        <p className='text-body text-muted-foreground'>
+          {accounts.length === 0
+            ? 'None yet'
+            : accounts.map((a) =>
+              a.providerId === 'credential' ? 'password' : a.providerId
+            ).join(', ')}
+        </p>
+      </Section>
+
+      <Section
+        title={`Sessions (${sessions.length})`}
+        action={sessions.length > 0 && (
+          <Button
+            className='shrink-0'
+            variant='ghost'
+            size='compact'
+            onClick={() =>
+              act(
+                'Signed out everywhere',
+                () => control.Send(new Calls.revokeSessions({ user: id })),
+              )}
+          >
+            Revoke all
+          </Button>
+        )}
+      >
+        <Table size='compact'>
+          <TableBody>
+            {sessions.map((session, i) => (
+              <TableRow key={session.id} index={i}>
+                <TableCell>
+                  <div className='truncate text-foreground'>
+                    {session.userAgent ?? 'Unknown device'}
+                  </div>
+                  <div className='text-caption'>
+                    {session.ipAddress ?? 'no address'} · since{' '}
+                    {new Date(session.createdAt).toLocaleString()}
+                  </div>
+                </TableCell>
+                <TableCell className='text-right'>
+                  <Button
+                    className='shrink-0'
+                    variant='ghost'
+                    size='compact'
+                    onClick={() =>
+                      act(
+                        'Session revoked',
+                        () =>
+                          control.Send(
+                            new Calls.revokeSessions({
+                              user: id,
+                              session: session.id,
+                            }),
+                          ),
+                      )}
+                  >
+                    Revoke
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Section>
+
+      <Button
+        variant='tertiary'
+        className='w-full text-destructive'
+        onClick={() =>
+          setConfirmRemove(true)}
+      >
+        Remove user
+      </Button>
+      <Dialog open={confirmRemove} onOpenChange={setConfirmRemove}>
+        <DialogContent size='sm'>
+          <DialogHeader>
+            <DialogTitle>Remove {user.email}?</DialogTitle>
+            <DialogDescription>
+              Removing {user.email}{' '}
+              deletes their sessions and sign-in methods. It can't be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
             <Button
-              variant='outline'
-              disabled={!password}
+              className='shrink-0'
+              variant='secondary'
               onClick={() =>
-                act('Password set', async () => {
-                  await api.setPassword({ user: id, password })
-                  setPassword('')
-                })}
+                setConfirmRemove(false)}
             >
-              Set password
+              Cancel
             </Button>
-          </div>
-        </section>
-
-        <section className='grid gap-2'>
-          <h3 className='font-medium'>Sign-in methods</h3>
-          <p className='text-muted-foreground'>
-            {accounts.length === 0
-              ? 'None yet'
-              : accounts.map((a) =>
-                a.providerId === 'credential' ? 'password' : a.providerId
-              ).join(', ')}
-          </p>
-        </section>
-
-        <section className='grid gap-2'>
-          <div className='flex items-center justify-between'>
-            <h3 className='font-medium'>Sessions ({sessions.length})</h3>
-            {sessions.length > 0 && (
-              <Button
-                size='sm'
-                variant='outline'
-                onClick={() =>
-                  act(
-                    'Signed out everywhere',
-                    () => api.revokeSessions({ user: id }),
-                  )}
-              >
-                Revoke all
-              </Button>
-            )}
-          </div>
-          {sessions.map((session) => (
-            <div
-              key={session.id}
-              className='flex items-center justify-between gap-2 rounded-md border px-3 py-2'
+            <Button
+              className='shrink-0'
+              variant='primary'
+              onClick={async () => {
+                try {
+                  await control.Send(
+                    new Calls.removeUser({ user: id, confirmed: true }),
+                  )
+                  setConfirmRemove(false)
+                  onRemoved()
+                } catch (e) {
+                  setConfirmRemove(false)
+                  setError(Describe(e))
+                }
+              }}
             >
-              <div className='min-w-0'>
-                <div className='truncate'>
-                  {session.userAgent ?? 'Unknown device'}
-                </div>
-                <div className='text-xs text-muted-foreground'>
-                  {session.ipAddress ?? 'no address'} · since{' '}
-                  {new Date(session.createdAt).toLocaleString()}
-                </div>
-              </div>
-              <Button
-                size='sm'
-                variant='outline'
-                onClick={() =>
-                  act(
-                    'Session revoked',
-                    () => api.revokeSessions({ user: id, session: session.id }),
-                  )}
-              >
-                Revoke
-              </Button>
-            </div>
-          ))}
-        </section>
-
-        <section className='grid gap-2 border-t pt-4'>
-          {confirmRemove
-            ? (
-              <Alert tone='destructive'>
-                <p>
-                  Removing {user.email}{' '}
-                  deletes their sessions and sign-in methods. It can't be
-                  undone.
-                </p>
-                <div className='mt-2 flex gap-2'>
-                  <Button
-                    size='sm'
-                    variant='destructive'
-                    onClick={async () => {
-                      try {
-                        await api.removeUser({ user: id, confirmed: true })
-                        onRemoved()
-                      } catch (e) {
-                        setError(describeError(e))
-                      }
-                    }}
-                  >
-                    Remove for good
-                  </Button>
-                  <Button
-                    size='sm'
-                    variant='outline'
-                    onClick={() => setConfirmRemove(false)}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </Alert>
-            )
-            : (
-              <Button
-                variant='outline'
-                className='text-destructive'
-                onClick={() => setConfirmRemove(true)}
-              >
-                Remove user
-              </Button>
-            )}
-        </section>
-      </CardContent>
-    </Card>
+              Remove for good
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Panel>
   )
 }

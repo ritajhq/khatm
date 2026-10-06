@@ -1,20 +1,30 @@
-import { useEffect, useState } from 'react'
-import type { PlanView, RevisionView } from '@khatm/contract'
+import { useState } from 'react'
+import type { PlanView } from '@khatm/contract'
+import { Calls, Rejected } from '@khatm/contract/messages'
 import {
-  Alert,
+  Badge,
   Button,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
+  Tooltip,
+  useIcon,
 } from '@khatm-libs/ui'
-import { api, ControlError, describeError } from '../api.ts'
+import { Describe } from '../control.ts'
+import { useControl } from '../control-provider.tsx'
+import { Notice } from '../components/notice.tsx'
+import { Panel } from '../components/panel.tsx'
+import { ImpactBadge } from '../components/tones.tsx'
+import { useCall } from '../use-call.ts'
 
 function download(name: string, content: string) {
   const url = URL.createObjectURL(
@@ -27,135 +37,162 @@ function download(name: string, content: string) {
   URL.revokeObjectURL(url)
 }
 
+/** Every applied manifest; any of them can be downloaded or rolled back to. */
 export function Revisions(
   { refresh, onChanged }: { refresh: number; onChanged(): void },
 ) {
-  const [revisions, setRevisions] = useState<RevisionView[]>([])
-  const [active, setActive] = useState<string | undefined>()
+  const control = useControl()
+  const ArrowDownIcon = useIcon('arrow-down')
+  const RotateIcon = useIcon('rotate-ccw')
+  const history = useCall(
+    () =>
+      Promise.all([
+        control.Send(new Calls.history({ limit: 50 })),
+        control.Send(new Calls.status({})),
+      ]),
+    [refresh],
+  )
   const [error, setError] = useState<string | undefined>()
   const [pending, setPending] = useState<
     { revision: string; steps: PlanView['steps'] } | undefined
   >()
   const [message, setMessage] = useState<string | undefined>()
-
-  useEffect(() => {
-    Promise.all([api.history({ limit: 50 }), api.status({})])
-      .then(([history, status]) => {
-        setRevisions(history.revisions)
-        setActive(status.active?.id)
-      })
-      .catch((e) => setError(describeError(e)))
-  }, [refresh])
+  const revisions = history.value?.[0].revisions ?? []
+  const active = history.value?.[1].active?.id
 
   async function rollback(revision: string, confirmed: boolean) {
     setError(undefined)
     setMessage(undefined)
     try {
-      const result = await api.rollback({ revision, confirmed })
+      const result = await control.Send(
+        new Calls.rollback({ revision, confirmed }),
+      )
       setPending(undefined)
       setMessage(`Rolled back as revision ${result.revision.id}`)
       onChanged()
     } catch (e) {
-      if (e instanceof ControlError && e.code === 'confirmation_required') {
-        setPending({ revision, steps: e.body.steps ?? [] })
+      if (e instanceof Rejected && e.Code === 'confirmation_required') {
+        setPending({ revision, steps: e.Steps })
         return
       }
-      setError(describeError(e))
+      setError(Describe(e))
     }
   }
 
   async function exportManifest(revision: string) {
     try {
-      const { files } = await api.export({ revision })
+      const { files } = await control.Send(new Calls.export({ revision }))
       download(
         `khatm-${revision}.json`,
         files['manifest.authored.json'] ?? files['manifest.json'],
       )
     } catch (e) {
-      setError(describeError(e))
+      setError(Describe(e))
     }
   }
 
   return (
-    <Card>
-      <CardHeader className='text-left'>
-        <CardTitle className='text-base'>Revisions</CardTitle>
-      </CardHeader>
-      <CardContent className='grid gap-4'>
-        {error && <Alert tone='destructive'>{error}</Alert>}
-        {message && <Alert>{message}</Alert>}
-        {pending && (
-          <Alert tone='destructive'>
-            <p>Rolling back to {pending.revision} is destructive:</p>
-            <ul className='list-disc pl-4'>
-              {pending.steps.map((s, i) => (
-                <li key={i}>{s.path}: {s.reason}</li>
-              ))}
-            </ul>
-            <div className='mt-2 flex gap-2'>
-              <Button
-                size='sm'
-                onClick={() => rollback(pending.revision, true)}
-              >
-                Roll back anyway
-              </Button>
-              <Button
-                size='sm'
-                variant='outline'
-                onClick={() => setPending(undefined)}
-              >
-                Cancel
-              </Button>
-            </div>
-          </Alert>
-        )}
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Revision</TableHead>
-              <TableHead>When</TableHead>
-              <TableHead>By</TableHead>
-              <TableHead>Reason</TableHead>
-              <TableHead />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {revisions.map((revision) => (
-              <TableRow key={revision.id}>
-                <TableCell className='font-mono text-xs'>
-                  {revision.id.slice(0, 8)}
-                  {revision.id === active && ' (serving)'}
-                </TableCell>
-                <TableCell>
-                  {new Date(revision.createdAt).toLocaleString()}
-                </TableCell>
-                <TableCell>{revision.author}</TableCell>
-                <TableCell className='text-muted-foreground'>
-                  {revision.reason}
-                </TableCell>
-                <TableCell className='flex justify-end gap-2'>
+    <Panel
+      title='Revisions'
+      description='Newest first. Rolling back applies an earlier manifest as a new revision.'
+    >
+      {(error ?? history.error) && (
+        <Notice tone='error'>{error ?? history.error}</Notice>
+      )}
+      {message && <Notice tone='success'>{message}</Notice>}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Revision</TableHead>
+            <TableHead>When</TableHead>
+            <TableHead>By</TableHead>
+            <TableHead>Reason</TableHead>
+            <TableHead />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {revisions.map((revision, i) => (
+            <TableRow key={revision.id} index={i}>
+              <TableCell className='font-mono text-caption'>
+                <span className='flex items-center gap-2'>
+                  <Tooltip content={revision.id}>
+                    <span>{revision.id.slice(0, 8)}</span>
+                  </Tooltip>
+                  {revision.id === active && (
+                    <Badge color='green'>(serving)</Badge>
+                  )}
+                </span>
+              </TableCell>
+              <TableCell>
+                {new Date(revision.createdAt).toLocaleString()}
+              </TableCell>
+              <TableCell>{revision.author}</TableCell>
+              <TableCell>{revision.reason}</TableCell>
+              <TableCell>
+                <div className='flex justify-end gap-2'>
                   <Button
-                    size='sm'
-                    variant='outline'
+                    variant='ghost'
+                    size='compact'
+                    leadingIcon={ArrowDownIcon}
                     onClick={() => exportManifest(revision.id)}
                   >
                     Download
                   </Button>
                   {revision.id !== active && (
                     <Button
-                      size='sm'
-                      variant='outline'
+                      variant='secondary'
+                      size='compact'
+                      leadingIcon={RotateIcon}
                       onClick={() => rollback(revision.id, false)}
                     >
                       Roll back
                     </Button>
                   )}
-                </TableCell>
-              </TableRow>
+                </div>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+
+      <Dialog
+        open={pending !== undefined}
+        onOpenChange={(open) => !open && setPending(undefined)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Roll back to {pending?.revision.slice(0, 8)}?
+            </DialogTitle>
+            <DialogDescription>
+              Rolling back to {pending?.revision} is destructive:
+            </DialogDescription>
+          </DialogHeader>
+          <ul className='grid gap-2 text-body'>
+            {pending?.steps.map((step, i) => (
+              <li key={i} className='flex items-start gap-2'>
+                <ImpactBadge impact={step.impact} />
+                <span>
+                  <span className='font-mono text-caption'>{step.path}</span>:
+                  {' '}
+                  {step.reason}
+                </span>
+              </li>
             ))}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
+          </ul>
+          <DialogFooter>
+            <Button variant='secondary' onClick={() => setPending(undefined)}>
+              Cancel
+            </Button>
+            <Button
+              variant='primary'
+              onClick={() => pending && rollback(pending.revision, true)}
+            >
+              Roll back anyway
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Panel>
   )
 }

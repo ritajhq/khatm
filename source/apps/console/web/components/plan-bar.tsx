@@ -1,23 +1,24 @@
 import { useState } from 'react'
 import type { PlanView } from '@khatm/contract'
+import { Calls } from '@khatm/contract/messages'
 import {
-  Alert,
   Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
+  CheckboxGroup,
+  CheckboxItem,
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
+  useIcon,
 } from '@khatm-libs/ui'
-import { api, describeError } from '../api.ts'
+import { Describe } from '../control.ts'
+import { useControl } from '../control-provider.tsx'
 import type { Checked } from '../draft.ts'
-import { ImpactBadge } from './impact.tsx'
+import { Notice } from './notice.tsx'
+import { Panel } from './panel.tsx'
+import { ImpactBadge } from './tones.tsx'
 
 /**
  * Plan, then apply: the one way the console changes anything. The plan is
@@ -27,6 +28,9 @@ import { ImpactBadge } from './impact.tsx'
 export function PlanBar(
   { checked, onApplied }: { checked: Checked; onApplied(): void },
 ) {
+  const control = useControl()
+  const SearchIcon = useIcon('search')
+  const CheckIcon = useIcon('check')
   const [plan, setPlan] = useState<PlanView | undefined>()
   const [planned, setPlanned] = useState<string | undefined>()
   const [confirmed, setConfirmed] = useState(false)
@@ -43,11 +47,13 @@ export function PlanBar(
     setError(undefined)
     setDone(undefined)
     try {
-      setPlan(await api.plan({ manifest: checked.authored }))
+      setPlan(
+        await control.Send(new Calls.plan({ manifest: checked.authored })),
+      )
       setPlanned(current)
       setConfirmed(false)
     } catch (e) {
-      setError(describeError(e))
+      setError(Describe(e))
     } finally {
       setBusy(false)
     }
@@ -58,11 +64,13 @@ export function PlanBar(
     setBusy(true)
     setError(undefined)
     try {
-      const result = await api.apply({
-        manifest: checked.authored,
-        base: plan.base,
-        confirmed,
-      })
+      const result = await control.Send(
+        new Calls.apply({
+          manifest: checked.authored,
+          base: plan.base,
+          confirmed,
+        }),
+      )
       setDone(
         result.changed
           ? `Applied as revision ${result.revision.id}`
@@ -71,100 +79,105 @@ export function PlanBar(
       setPlan(undefined)
       onApplied()
     } catch (e) {
-      setError(describeError(e))
+      setError(Describe(e))
     } finally {
       setBusy(false)
     }
   }
 
+  const canApply = plan && !stale && !plan.isEmpty && !plan.isBlocked &&
+    (!plan.needsConfirmation || confirmed) && !busy
+
   return (
-    <Card>
-      <CardHeader className='text-left'>
-        <CardTitle className='text-base'>Plan and apply</CardTitle>
-        <CardDescription>
-          {checked.ok
-            ? 'The draft is valid. Plan it to see what applying would change.'
-            : 'Fix the draft before planning.'}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className='grid gap-4'>
-        {!checked.ok && (
-          <Alert tone='destructive'>
-            <ul className='list-disc pl-4'>
-              {checked.problems.map((p) => <li key={p}>{p}</li>)}
-            </ul>
-          </Alert>
-        )}
-        {error && <Alert tone='destructive'>{error}</Alert>}
-        {done && <Alert>{done}</Alert>}
-        {plan && !stale && (
-          plan.isEmpty ? <Alert>No changes.</Alert> : (
-            <>
-              <p className='text-sm'>
-                Against{' '}
-                {plan.base ? `revision ${plan.base}` : 'a fresh install'}:{' '}
-                <ImpactBadge impact={plan.impact} />
-              </p>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Impact</TableHead>
-                    <TableHead>Change</TableHead>
-                    <TableHead>Why</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {plan.steps.map((step, i) => (
-                    <TableRow key={`${step.path}-${i}`}>
-                      <TableCell>
-                        <ImpactBadge impact={step.impact} />
-                      </TableCell>
-                      <TableCell className='font-mono text-xs'>
-                        {step.path || '(whole manifest)'}
-                      </TableCell>
-                      <TableCell className='text-muted-foreground'>
-                        {step.reason}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-              {plan.isBlocked && (
-                <Alert tone='destructive'>
-                  Blocked: do the manual steps above, then plan again.
-                </Alert>
-              )}
-              {plan.needsConfirmation && (
-                <label className='flex items-center gap-2 text-sm'>
-                  <input
-                    type='checkbox'
-                    checked={confirmed}
-                    onChange={(e) => setConfirmed(e.currentTarget.checked)}
-                  />
-                  I understand the destructive changes above
-                </label>
-              )}
-            </>
-          )
-        )}
-        {stale && <Alert>The draft changed since this plan. Plan again.</Alert>}
+    <Panel
+      title='Plan and apply'
+      description={checked.ok
+        ? 'The draft is valid. Plan it to see what applying would change.'
+        : 'Fix the draft before planning.'}
+      action={
         <div className='flex gap-2'>
           <Button
-            variant='outline'
+            variant='secondary'
+            size='compact'
+            leadingIcon={SearchIcon}
             disabled={!checked.ok || busy}
             onClick={makePlan}
           >
             Plan
           </Button>
           <Button
-            disabled={!plan || stale || plan.isEmpty || plan.isBlocked ||
-              (plan.needsConfirmation && !confirmed) || busy}
+            variant='primary'
+            size='compact'
+            leadingIcon={CheckIcon}
+            loading={busy && plan !== undefined}
+            disabled={!canApply}
             onClick={apply}
           >
             Apply
           </Button>
         </div>
-      </CardContent>
-    </Card>
+      }
+    >
+      {!checked.ok && (
+        <Notice tone='error' details={checked.problems.join('; ')}>
+          The draft has problems
+        </Notice>
+      )}
+      {error && <Notice tone='error'>{error}</Notice>}
+      {done && <Notice tone='success'>{done}</Notice>}
+      {stale && (
+        <Notice tone='warning'>
+          The draft changed since this plan. Plan again.
+        </Notice>
+      )}
+      {plan && !stale && plan.isEmpty && <Notice>No changes.</Notice>}
+      {plan && !stale && !plan.isEmpty && (
+        <>
+          <p className='flex items-center gap-2 text-body text-muted-foreground'>
+            Against {plan.base ? `revision ${plan.base}` : 'a fresh install'}:
+            <ImpactBadge impact={plan.impact} />
+          </p>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className='w-32'>Impact</TableHead>
+                <TableHead>Change</TableHead>
+                <TableHead>Why</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {plan.steps.map((step, i) => (
+                <TableRow key={`${step.path}-${i}`} index={i}>
+                  <TableCell>
+                    <ImpactBadge impact={step.impact} />
+                  </TableCell>
+                  <TableCell className='font-mono text-caption'>
+                    {step.path || '(whole manifest)'}
+                  </TableCell>
+                  <TableCell>{step.reason}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          {plan.isBlocked && (
+            <Notice tone='error'>
+              Blocked: do the manual steps above, then plan again.
+            </Notice>
+          )}
+          {plan.needsConfirmation && (
+            <CheckboxGroup
+              checkedIndices={confirmed ? new Set([0]) : new Set()}
+            >
+              <CheckboxItem
+                index={0}
+                label='I understand the destructive changes above'
+                checked={confirmed}
+                onToggle={() => setConfirmed(!confirmed)}
+              />
+            </CheckboxGroup>
+          )}
+        </>
+      )}
+    </Panel>
   )
 }

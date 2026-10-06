@@ -6,16 +6,19 @@ import {
   type SlotName,
 } from '@khatm/spec'
 import {
-  Alert,
   Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-  Input,
-  Label,
-  Textarea,
+  ColorPickerPopover,
+  InputField,
+  InputGroup,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  Switch,
+  TabsSubtle,
+  TabsSubtleItem,
+  Tooltip,
+  useIcon,
 } from '@khatm-libs/ui'
 import {
   branding,
@@ -24,6 +27,9 @@ import {
   previewQuery,
   withBranding,
 } from '../draft.ts'
+import { CodeField } from '../components/code-field.tsx'
+import { Notice } from '../components/notice.tsx'
+import { Panel } from '../components/panel.tsx'
 
 const PAGES = ['login', 'signup', 'error'] as const
 
@@ -34,7 +40,9 @@ const SLOT_LOCALE = 'en'
 export function Branding(
   { checked, onChange }: { checked: Checked; onChange(text: string): void },
 ) {
-  const [page, setPage] = useState<typeof PAGES[number]>('login')
+  const PlusIcon = useIcon('plus')
+  const RemoveIcon = useIcon('x')
+  const [page, setPage] = useState(0)
   const [newToken, setNewToken] = useState('')
   const [newPart, setNewPart] = useState<string>(PART_NAMES[0])
   const [newProperty, setNewProperty] = useState('')
@@ -42,16 +50,14 @@ export function Branding(
   // doesn't take the editor away; the plan bar lists what is wrong.
   const authored = checked.authored
   if (!authored) {
-    return (
-      <p className='text-sm text-muted-foreground'>
-        Fix the manifest to edit branding.
-      </p>
-    )
+    return <Notice tone='warning'>Fix the manifest to edit branding.</Notice>
   }
   const current = branding(authored)
   const update = (next: typeof current) =>
     onChange(format(withBranding(authored, next)))
   const slots = current.slots[SLOT_LOCALE] ?? {}
+  const setToken = (name: string, value: string) =>
+    update({ ...current, tokens: { ...current.tokens, [name]: value } })
   const setSlot = (name: SlotName, html: string) => {
     const { [name]: _, ...others } = slots
     update({
@@ -77,222 +83,215 @@ export function Branding(
     })
   }
   const headless = current.pages === 'headless'
+  const remove = (label: string, onRemove: () => void) => (
+    <Tooltip content={label}>
+      <Button
+        className='shrink-0'
+        variant='ghost'
+        size='icon'
+        aria-label={label}
+        leadingIcon={RemoveIcon}
+        onClick={onRemove}
+      />
+    </Tooltip>
+  )
 
   return (
-    <div className='grid gap-6 lg:grid-cols-[1fr_1fr]'>
-      <Card>
-        <CardHeader className='text-left'>
-          <CardTitle className='text-base'>Branding</CardTitle>
-          <CardDescription>
-            Tokens are CSS custom properties: primary, background, radius…
-          </CardDescription>
-        </CardHeader>
-        <CardContent className='grid gap-4'>
-          <div className='grid gap-2'>
-            <Label htmlFor='brand-name'>Name</Label>
-            <Input
-              id='brand-name'
+    <div className='grid gap-6 lg:grid-cols-2'>
+      <div className='grid min-w-0 content-start gap-6'>
+        <Panel
+          title='Identity'
+          description='The name the pages show, and the design tokens they use.'
+        >
+          <InputGroup>
+            <InputField
+              index={0}
+              label='Name'
               value={current.name ?? ''}
-              onChange={(e) =>
-                update({
-                  ...current,
-                  name: e.currentTarget.value || undefined,
-                })}
+              onChange={(name) =>
+                update({ ...current, name: name || undefined })}
             />
-          </div>
+          </InputGroup>
           {Object.entries(current.tokens).map(([name, value]) => (
-            <div key={name} className='grid gap-2'>
-              <Label htmlFor={`token-${name}`}>--{name}</Label>
-              <div className='flex gap-2'>
-                <Input
-                  id={`token-${name}`}
+            <div key={name} className='flex items-end gap-2'>
+              <InputGroup className='min-w-0 flex-1'>
+                <InputField
+                  index={0}
+                  label={`--${name}`}
                   value={value}
-                  onChange={(e) =>
-                    update({
-                      ...current,
-                      tokens: {
-                        ...current.tokens,
-                        [name]: e.currentTarget.value,
-                      },
-                    })}
+                  onChange={(next) =>
+                    setToken(name, next)}
                 />
-                <Button
-                  variant='outline'
-                  onClick={() => {
-                    const { [name]: _, ...rest } = current.tokens
-                    update({ ...current, tokens: rest })
-                  }}
-                >
-                  Remove
-                </Button>
-              </div>
+              </InputGroup>
+              <ColorPickerPopover
+                value={value}
+                onValueChange={(next) =>
+                  setToken(name, next)}
+                triggerLabel={`Pick --${name}`}
+              />
+              {remove(`Remove --${name}`, () => {
+                const { [name]: _, ...rest } = current.tokens
+                update({ ...current, tokens: rest })
+              })}
             </div>
           ))}
-          <div className='flex gap-2'>
-            <Input
-              aria-label='New token name'
-              placeholder='token name, e.g. primary'
-              value={newToken}
-              onChange={(e) => setNewToken(e.currentTarget.value.trim())}
-            />
+          <div className='flex items-end gap-2'>
+            <InputGroup className='min-w-0 flex-1'>
+              <InputField
+                index={0}
+                label='New token name'
+                placeholder='primary, background, radius…'
+                value={newToken}
+                onChange={(name) => setNewToken(name.trim())}
+              />
+            </InputGroup>
             <Button
-              variant='outline'
+              className='shrink-0'
+              variant='secondary'
+              leadingIcon={PlusIcon}
               disabled={!newToken || newToken in current.tokens}
               onClick={() => {
-                update({
-                  ...current,
-                  tokens: { ...current.tokens, [newToken]: 'black' },
-                })
+                setToken(newToken, 'black')
                 setNewToken('')
               }}
             >
               Add token
             </Button>
           </div>
+          <Switch
+            label='Headless: serve no pages, our apps build their own'
+            checked={headless}
+            onToggle={() =>
+              update({ ...current, pages: headless ? 'hosted' : 'headless' })}
+          />
+        </Panel>
 
-          <label className='flex items-center gap-2 border-t pt-4 text-sm'>
-            <input
-              type='checkbox'
-              checked={headless}
-              onChange={(e) =>
-                update({
-                  ...current,
-                  pages: e.currentTarget.checked ? 'headless' : 'hosted',
-                })}
-            />
-            Headless: serve no pages, our apps build their own
-          </label>
-
-          <section className='grid gap-3 border-t pt-4'>
-            <h3 className='text-sm font-medium'>Scoped CSS</h3>
-            <p className='text-xs text-muted-foreground'>
-              Declarations for the pages' stable parts. Values follow the token
-              rules: no url(), braces or semicolons.
-            </p>
-            {Object.entries(current.parts).flatMap(([part, style]) =>
-              Object.entries(style).map(([property, value]) => (
-                <div key={`${part}:${property}`} className='flex gap-2'>
-                  <Label
-                    htmlFor={`part-${part}-${property}`}
-                    className='w-48 shrink-0 font-mono text-xs'
-                  >
-                    {part} {property}
-                  </Label>
-                  <Input
-                    id={`part-${part}-${property}`}
+        <Panel
+          title='Scoped CSS'
+          description="Declarations for the pages' stable parts. Values follow the token rules: no url(), braces or semicolons."
+        >
+          {Object.entries(current.parts).flatMap(([part, style]) =>
+            Object.entries(style).map(([property, value]) => (
+              <div key={`${part}:${property}`} className='flex items-end gap-2'>
+                <InputGroup className='min-w-0 flex-1'>
+                  <InputField
+                    index={0}
+                    label={`${part} ${property}`}
                     value={value}
-                    onChange={(e) =>
-                      setDeclaration(part, property, e.currentTarget.value)}
+                    onChange={(next) =>
+                      setDeclaration(part, property, next)}
                   />
-                  <Button
-                    variant='outline'
-                    onClick={() =>
-                      setDeclaration(part, property, undefined)}
-                  >
-                    Remove
-                  </Button>
-                </div>
-              ))
-            )}
-            <div className='flex gap-2'>
-              <select
-                aria-label='Part'
-                className='rounded-md border bg-background px-2 text-sm'
-                value={newPart}
-                onChange={(e) => setNewPart(e.currentTarget.value)}
-              >
-                {PART_NAMES.map((part) => (
-                  <option key={part} value={part}>{part}</option>
+                </InputGroup>
+                {remove(`Remove ${part} ${property}`, () =>
+                  setDeclaration(part, property, undefined))}
+              </div>
+            ))
+          )}
+          <div className='flex items-end gap-2'>
+            <Select value={newPart} onValueChange={setNewPart}>
+              <SelectTrigger aria-label='Part' className='w-40' />
+              <SelectContent>
+                {PART_NAMES.map((part, i) => (
+                  <SelectItem key={part} index={i} value={part}>
+                    {part}
+                  </SelectItem>
                 ))}
-              </select>
-              <Input
-                aria-label='CSS property'
-                placeholder='property, e.g. border-radius'
+              </SelectContent>
+            </Select>
+            <InputGroup className='min-w-0 flex-1'>
+              <InputField
+                index={0}
+                label='CSS property'
+                placeholder='border-radius'
                 value={newProperty}
-                onChange={(e) => setNewProperty(e.currentTarget.value.trim())}
+                onChange={(property) => setNewProperty(property.trim())}
               />
-              <Button
-                variant='outline'
-                disabled={!newProperty ||
-                  newProperty in (current.parts[newPart] ?? {})}
-                onClick={() => {
-                  setDeclaration(newPart, newProperty, 'initial')
-                  setNewProperty('')
-                }}
-              >
-                Add rule
-              </Button>
-            </div>
-          </section>
-
-          <section className='grid gap-3 border-t pt-4'>
-            <h3 className='text-sm font-medium'>Slots ({SLOT_LOCALE})</h3>
-            <p className='text-xs text-muted-foreground'>
-              Short HTML: p, a (http, mailto or a path), strong, em, lists and
-              line breaks. Anything else is refused.
-            </p>
-            {SLOT_NAMES.map((name) => {
-              const html = slots[name] ?? ''
-              const problems = sanitizeSlot(html).problems
-              return (
-                <div key={name} className='grid gap-2'>
-                  <Label htmlFor={`slot-${name}`} className='capitalize'>
-                    {name}
-                  </Label>
-                  <Textarea
-                    id={`slot-${name}`}
-                    rows={2}
-                    className='font-mono text-xs'
-                    value={html}
-                    onChange={(e) => setSlot(name, e.currentTarget.value)}
-                  />
-                  {problems.length > 0 && (
-                    <Alert tone='destructive'>{problems.join('; ')}</Alert>
-                  )}
-                </div>
-              )
-            })}
-          </section>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader className='text-left'>
-          <CardTitle className='text-base'>Preview</CardTitle>
-          <div className='flex gap-2'>
-            {PAGES.map((p) => (
-              <Button
-                key={p}
-                size='sm'
-                variant={p === page ? 'default' : 'outline'}
-                onClick={() => setPage(p)}
-              >
-                {p}
-              </Button>
-            ))}
+            </InputGroup>
+            <Button
+              className='shrink-0'
+              variant='secondary'
+              leadingIcon={PlusIcon}
+              disabled={!newProperty ||
+                newProperty in (current.parts[newPart] ?? {})}
+              onClick={() => {
+                setDeclaration(newPart, newProperty, 'initial')
+                setNewProperty('')
+              }}
+            >
+              Add rule
+            </Button>
           </div>
-        </CardHeader>
-        <CardContent>
-          {headless
-            ? (
-              <p className='text-sm text-muted-foreground'>
-                Headless: the auth server serves no pages to preview.
-              </p>
+        </Panel>
+
+        <Panel
+          title={`Slots (${SLOT_LOCALE})`}
+          description='Short HTML: p, a (http, mailto or a path), strong, em, lists and line breaks. Anything else is refused.'
+        >
+          {SLOT_NAMES.map((name) => {
+            const html = slots[name] ?? ''
+            const problems = sanitizeSlot(html).problems
+            return (
+              <label key={name} className='grid gap-1'>
+                <span className='text-caption capitalize text-muted-foreground'>
+                  {name}
+                </span>
+                <CodeField
+                  id={`slot-${name}`}
+                  aria-label={name.charAt(0).toUpperCase() + name.slice(1)}
+                  rows={2}
+                  value={html}
+                  onChange={(e) => setSlot(name, e.currentTarget.value)}
+                />
+                {problems.length > 0 && (
+                  <Notice tone='error'>{problems.join('; ')}</Notice>
+                )}
+              </label>
             )
-            : checked.ok
-            ? (
-              <iframe
-                title='Login page preview'
-                className='h-[36rem] w-full rounded-md border'
-                src={`/preview/${page}?draft=${previewQuery(checked.resolved)}`}
+          })}
+        </Panel>
+      </div>
+
+      <Panel
+        title='Preview'
+        className='self-start lg:sticky lg:top-4'
+        action={
+          <TabsSubtle
+            selectedIndex={page}
+            onSelect={setPage}
+            idPrefix='preview'
+          >
+            {PAGES.map((p, i) => (
+              <TabsSubtleItem
+                key={p}
+                index={i}
+                label={p}
               />
-            )
-            : (
-              <p className='text-sm text-muted-foreground'>
-                The preview comes back once the draft is valid.
-              </p>
-            )}
-        </CardContent>
-      </Card>
+            ))}
+          </TabsSubtle>
+        }
+      >
+        {headless
+          ? (
+            <Notice>
+              Headless: the auth server serves no pages to preview.
+            </Notice>
+          )
+          : checked.ok
+          ? (
+            <iframe
+              title='Login page preview'
+              className='h-[36rem] w-full rounded-lg bg-background shadow-surface-1'
+              src={`/preview/${PAGES[page]}?draft=${
+                previewQuery(checked.resolved)
+              }`}
+            />
+          )
+          : (
+            <Notice tone='warning'>
+              The preview comes back once the draft is valid.
+            </Notice>
+          )}
+      </Panel>
     </div>
   )
 }

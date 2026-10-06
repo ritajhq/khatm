@@ -4,6 +4,7 @@ services:
     environment:
       PORT: '4200'
       KHATM_CONTROL_URL: 'http://control-guard:8080'
+      KHATM_SESSION_URL: 'http://khatm:4100/api/auth/get-session'
     develop:
       watch:
         - path: console/server

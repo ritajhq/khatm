@@ -1,6 +1,11 @@
 import { procedures } from '@khatm/contract'
+import * as Mechanisms from '@khatm/mechanisms'
 import { PageConfig, renderPage } from '@khatm/pages'
 import { BrandingSpec } from '@khatm/spec'
+import * as Horizon from '@ritaj/horizon'
+import * as MUX from '@ritaj/mux'
+import { Server as HttpTransport } from '@ritaj/mux/server/http'
+import { Relay } from './relay.ts'
 
 export interface ConsoleOptions {
   /** The built console: `index.html`, `main.js`, `index.css`. */
@@ -9,15 +14,16 @@ export interface ConsoleOptions {
   readonly loginDist: string
   /** The control API, normally its idhn guard: `http://khatm-control-guard:8080`. */
   readonly controlUrl: string
-  readonly fetch?: typeof fetch
+  /** khatm's session endpoint, to tell who is calling: `http://khatm:4100/api/auth/get-session`. */
+  readonly sessionUrl: string
 }
 
 const PROCEDURES: ReadonlySet<string> = new Set(
   Object.values(procedures).map((p) => p.name),
 )
 
-/** Only these reach the control API: the caller's credentials and the body's type. */
-const RELAYED_HEADERS = ['cookie', 'authorization', 'content-type']
+/** How long a control call may take: an apply or rollback waits for the new worker to pass its health checks. */
+export const CALL_TIMEOUT_MS = 120_000
 
 const TYPES: Readonly<Record<string, string>> = {
   'main.js': 'text/javascript; charset=utf-8',
@@ -27,7 +33,11 @@ const TYPES: Readonly<Record<string, string>> = {
 const CONSOLE_CSP = [
   "default-src 'self'",
   "script-src 'self'",
-  "style-src 'self'",
+  // Fluid's primitives (Radix, framer-motion) inject <style> elements at
+  // runtime. Scripts stay 'self' only; the console renders no untrusted
+  // markup itself (slot HTML is only shown in the preview frame, under the
+  // login pages' own policy).
+  "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data:",
   "connect-src 'self'",
   "frame-src 'self'",
@@ -41,15 +51,29 @@ const CONSOLE_CSP = [
  * instances can run behind one address:
  *
  * - `GET /…` serves the single-page app;
- * - `POST /control/<procedure>` relays the call to the control API with the
- *   caller's session, and the control API's guard decides;
+ * - `POST /control/<procedure>` takes the call as a horizon message and
+ *   relays it to the control API on behalf of its sender, with their
+ *   session: the control API's guard decides (see Relay);
  * - `GET /preview/<page>?draft=…` renders a login page for a draft branding
  *   with the login app's own assets, without calling the auth server.
  */
 export async function createConsoleHandler(
   options: ConsoleOptions,
 ): Promise<(request: Request) => Promise<Response>> {
-  const send = options.fetch ?? fetch
+  const transport = new HttpTransport(
+    new MUX.Authentication([
+      new Mechanisms.Session({ url: options.sessionUrl }),
+    ]),
+  )
+  const resolvers = new Horizon.Resolvers()
+  const handlers = new Horizon.Handlers()
+  new Relay(options.controlUrl.replace(/\/$/, '')).Serve(resolvers, handlers)
+  const horizon = new Horizon.Server(resolvers, handlers)
+  horizon.OnCrashed.Do((message, error, incident) => {
+    console.error(`[console] incident ${incident} handling`, message, error)
+  })
+  horizon.Use(transport)
+
   const index = await Deno.readTextFile(`${options.dist}/index.html`)
   const assets = new Map<string, string>()
   const loginAssets = new Map<string, string>()
@@ -63,8 +87,6 @@ export async function createConsoleHandler(
   const loginTemplate = await Deno.readTextFile(
     `${options.loginDist}/index.html`,
   )
-  const controlUrl = options.controlUrl.replace(/\/$/, '')
-
   const asset = (files: Map<string, string>, name: string) =>
     files.has(name)
       ? new Response(files.get(name), {
@@ -83,32 +105,8 @@ export async function createConsoleHandler(
       if (!PROCEDURES.has(name)) {
         return new Response('Not found', { status: 404 })
       }
-      const headers = new Headers()
-      for (const header of RELAYED_HEADERS) {
-        const value = request.headers.get(header)
-        if (value !== null) headers.set(header, value)
-      }
-      try {
-        const answer = await send(`${controlUrl}/${name}`, {
-          method: 'POST',
-          headers,
-          body: await request.arrayBuffer(),
-        })
-        return new Response(answer.body, {
-          status: answer.status,
-          headers: {
-            'content-type': answer.headers.get('content-type') ??
-              'application/json',
-          },
-        })
-      } catch {
-        return Response.json({
-          error: {
-            code: 'internal',
-            message: 'The control API could not be reached',
-          },
-        }, { status: 502 })
-      }
+      // Applying waits for the new worker to be healthy, well past mux's default.
+      return await transport.Handle(request, { timeoutMs: CALL_TIMEOUT_MS })
     }
 
     if (request.method !== 'GET' && request.method !== 'HEAD') {

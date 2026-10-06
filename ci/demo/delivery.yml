@@ -80,6 +80,7 @@ deploy:
         PORT: "4200"
         # URL spelled out: a ${compute.*} reference bakes to a bare port.
         KHATM_CONTROL_URL: http://control-guard:8080
+        KHATM_SESSION_URL: http://khatm:4100/api/auth/get-session
       development:
         # It reads its pages and the login pages once, at start.
         sync+restart:

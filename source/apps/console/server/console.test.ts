@@ -1,4 +1,11 @@
-import { assert, assertEquals, assertStringIncludes } from '@std/assert'
+import {
+  assert,
+  assertEquals,
+  assertInstanceOf,
+  assertStringIncludes,
+} from '@std/assert'
+import { Calls } from '@khatm/contract/messages'
+import * as MUX from '@ritaj/mux'
 import { chromium, type Page } from 'playwright-core'
 import { defaultRegistry } from '@khatm/registry'
 import { parseManifest } from '@khatm/spec'
@@ -10,7 +17,7 @@ import {
 } from '@khatm/orchestrator'
 import { createConsoleHandler } from './server.ts'
 
-const CHROMIUM = '/opt/pw-browsers/chromium'
+const CHROMIUM = Deno.env.get('CHROMIUM') ?? '/opt/pw-browsers/chromium'
 const here = (path: string) => new URL(path, import.meta.url).pathname
 const WORKER = here('../../worker/main.ts')
 const available = [
@@ -119,6 +126,7 @@ Deno.test({
           dist: here('../../../artifacts/console/web'),
           loginDist: here('../../../artifacts/login'),
           controlUrl: controlGuard,
+          sessionUrl: `${auth}/api/auth/get-session`,
         }),
       ))
     }
@@ -132,13 +140,16 @@ Deno.test({
         { author: 'bootstrap' },
       )
 
-      // Nobody signed in: the control API's guard refuses the console's relay.
+      // Nobody signed in: the control API's guard refuses the console's relay,
+      // and the call comes back returned, as if the browser had made it.
       const anonymous = await fetch(`${consoles[0]}/control/khatm.status`, {
         method: 'POST',
-        body: '{}',
+        body: JSON.stringify(new Calls.status({}).toJSON()),
       })
-      assertEquals(anonymous.status, 401)
-      await anonymous.body?.cancel()
+      assertInstanceOf(
+        MUX.Packet.Load(await anonymous.text()),
+        MUX.Unauthenticated,
+      )
 
       // Cookies ignore ports, so signing in on the auth origin signs the console in.
       const context = await browser.newContext()
@@ -157,7 +168,9 @@ Deno.test({
 
       // Console A: turn the username plugin on through its generated form, plan, apply.
       await page.goto(`${consoles[0]}/#/configuration`)
-      await page.getByLabel('username', { exact: true }).check()
+      // Each plugin is an accordion item: open it, then switch it on.
+      await page.getByRole('button', { name: 'username' }).click()
+      await page.getByRole('switch', { name: 'username', exact: true }).click()
       await page.getByLabel('minUsernameLength (optional)').fill('4')
       assertStringIncludes(
         await page.getByLabel('Manifest JSON').inputValue(),
@@ -204,17 +217,22 @@ Deno.test({
 
       // Branding: a draft reaches the preview without an apply.
       await page.goto(`${consoles[0]}/#/branding`)
-      await page.getByLabel('Name', { exact: true }).fill('Acme')
-      await page.getByLabel('New token name').fill('primary')
+      // Fluid labels carry an aria-hidden copy of their text (for a steady
+      // width while the weight animates): find fields by accessible name.
+      const field = (name: string) =>
+        page.getByRole('textbox', { name, exact: true })
+      await field('Name').fill('Acme')
+      await field('New token name').fill('primary')
       await page.getByRole('button', { name: 'Add token' }).click()
-      await page.getByLabel('--primary').fill('rgb(10, 120, 30)')
+      await field('--primary').fill('rgb(10, 120, 30)')
       const preview = page.frameLocator('iframe[title="Login page preview"]')
       await preview.getByText('Acme').waitFor()
       await expectPrimary(page, 'rgb(10, 120, 30)')
-      await page.getByLabel('Part').selectOption('card')
-      await page.getByLabel('CSS property').fill('border-radius')
+      await page.getByRole('combobox', { name: 'Part' }).click()
+      await page.getByRole('option', { name: 'card', exact: true }).click()
+      await field('CSS property').fill('border-radius')
       await page.getByRole('button', { name: 'Add rule' }).click()
-      await page.getByLabel('card border-radius').fill('0px')
+      await field('card border-radius').fill('0px')
       await page.getByLabel('Legal').fill(
         '<p>See the <a href="https://example.com/terms">terms</a></p>',
       )
@@ -260,15 +278,17 @@ Deno.test({
         })).json())?.user?.email
 
       await other.goto(`${consoles[1]}/#/users`)
-      await other.getByLabel('Search by email').fill('bob')
+      await other.getByRole('textbox', { name: 'Search by email' }).fill('bob')
       await other.getByRole('button', { name: 'Search' }).click()
       await other.getByRole('cell', { name: /bob@example.com/ }).click()
       const panel = other.getByLabel('User bob@example.com')
-      await panel.getByLabel('Role').fill('editor')
+      await panel.getByRole('textbox', { name: 'Role', exact: true }).fill(
+        'editor',
+      )
       await panel.getByRole('button', { name: 'Set role' }).click()
       await panel.getByText('Role set to editor').waitFor()
       assertEquals(await bobSession(), 'bob@example.com')
-      await panel.getByLabel('Ban reason').fill('spam')
+      await panel.getByRole('textbox', { name: 'Ban reason' }).fill('spam')
       await panel.getByRole('button', { name: 'Ban', exact: true }).click()
       await panel.getByText('Banned and signed out').waitFor()
       assertEquals(await bobSession(), undefined)

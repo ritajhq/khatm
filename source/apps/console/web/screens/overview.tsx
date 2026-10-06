@@ -1,12 +1,6 @@
-import { useEffect, useState } from 'react'
-import type { RevisionView } from '@khatm/contract'
+import { Calls } from '@khatm/contract/messages'
 import {
-  Alert,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
+  InputCopy,
   Table,
   TableBody,
   TableCell,
@@ -14,87 +8,72 @@ import {
   TableHeader,
   TableRow,
 } from '@khatm-libs/ui'
-import { api, describeError } from '../api.ts'
+import { useControl } from '../control-provider.tsx'
 import { Doctor } from '../components/doctor.tsx'
+import { Notice } from '../components/notice.tsx'
+import { Panel } from '../components/panel.tsx'
+import { useCall } from '../use-call.ts'
 
-type Event = { at: string; type: string; data: Record<string, unknown> }
-
+/** What is serving, whether it is healthy, and what the orchestrator did lately. */
 export function Overview({ refresh }: { refresh: number }) {
-  const [active, setActive] = useState<RevisionView | undefined | null>(null)
-  const [events, setEvents] = useState<Event[]>([])
-  const [error, setError] = useState<string | undefined>()
-
-  useEffect(() => {
-    Promise.all([api.status({}), api.events({ limit: 20 })])
-      .then(([status, recent]) => {
-        setActive(status.active)
-        setEvents([...recent.events].reverse())
-      })
-      .catch((e) => setError(describeError(e)))
-  }, [refresh])
+  const control = useControl()
+  const status = useCall(() => control.Send(new Calls.status({})), [refresh])
+  const recent = useCall(() => control.Send(new Calls.events({ limit: 20 })), [
+    refresh,
+  ])
+  const active = status.value?.active
+  const events = [...(recent.value?.events ?? [])].reverse()
 
   return (
     <div className='grid gap-6'>
-      {error && <Alert tone='destructive'>{error}</Alert>}
-      <Card>
-        <CardHeader className='text-left'>
-          <CardTitle className='text-base'>Serving</CardTitle>
-          <CardDescription>
-            {active === null
-              ? 'Loading…'
-              : active
-              ? `Revision ${active.id}`
-              : 'Nothing has been applied yet'}
-          </CardDescription>
-        </CardHeader>
+      {status.error && <Notice tone='error'>{status.error}</Notice>}
+      <Panel
+        title='Serving'
+        description={status.loading
+          ? 'Loading…'
+          : active
+          ? `Applied by ${active.author} on ${
+            new Date(active.createdAt).toLocaleString()
+          }`
+          : 'Nothing has been applied yet'}
+      >
         {active && (
-          <CardContent className='grid gap-1 text-sm'>
-            <span>
-              Applied by {active.author} on{' '}
-              {new Date(active.createdAt).toLocaleString()}
-            </span>
+          <div className='grid gap-3'>
+            <InputCopy label='Revision' value={active.id} />
             {active.reason && (
-              <span className='text-muted-foreground'>{active.reason}</span>
+              <p className='text-body text-muted-foreground'>{active.reason}</p>
             )}
-            <span className='font-mono text-xs text-muted-foreground'>
-              {active.manifest}
-            </span>
-          </CardContent>
+            <InputCopy label='Manifest digest' value={active.manifest} />
+          </div>
         )}
-      </Card>
+      </Panel>
       {active && <Doctor />}
-      <Card>
-        <CardHeader className='text-left'>
-          <CardTitle className='text-base'>Recent events</CardTitle>
-          <CardDescription>
-            What this orchestrator did since it started
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>When</TableHead>
-                <TableHead>Event</TableHead>
-                <TableHead>Details</TableHead>
+      <Panel
+        title='Recent events'
+        description='What this orchestrator did since it started'
+      >
+        {recent.error && <Notice tone='error'>{recent.error}</Notice>}
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className='w-28'>When</TableHead>
+              <TableHead className='w-48'>Event</TableHead>
+              <TableHead>Details</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {events.map((event, i) => (
+              <TableRow key={i} index={i}>
+                <TableCell>{new Date(event.at).toLocaleTimeString()}</TableCell>
+                <TableCell>{event.type}</TableCell>
+                <TableCell className='max-w-md truncate font-mono text-caption'>
+                  {JSON.stringify(event.data)}
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {events.map((event, i) => (
-                <TableRow key={i}>
-                  <TableCell>
-                    {new Date(event.at).toLocaleTimeString()}
-                  </TableCell>
-                  <TableCell>{event.type}</TableCell>
-                  <TableCell className='max-w-md truncate font-mono text-xs'>
-                    {JSON.stringify(event.data)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+            ))}
+          </TableBody>
+        </Table>
+      </Panel>
     </div>
   )
 }

@@ -1,7 +1,7 @@
 @import "tailwindcss";
+/* Fluid's tokens, surfaces, type scale and keyframes (see libs/ui/styles.css). */
+@import "@khatm-libs/ui/styles";
 @source "../../../libs/ui";
-
-@custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --color-background: var(--background);
