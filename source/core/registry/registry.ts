@@ -3,6 +3,8 @@ import {
   digestOf,
   type Manifest,
   type ManifestDigest,
+  type PlacedManifest,
+  type Placement,
   resolve,
   type ResolvedManifest,
 } from '@khatm/spec'
@@ -110,6 +112,20 @@ export class Registry {
     if (problems.length > 0) throw new UnresolvableManifestError(problems)
 
     return resolved
+  }
+
+  /**
+   * `resolved` in the deployment `placement` reads from: its references read,
+   * and resolved again, so what is derived from them (trusted origins, the
+   * landing app, the cookie domain) holds what was read. Throws
+   * `UnplaceableManifestError`.
+   */
+  place(resolved: ResolvedManifest, placement: Placement): PlacedManifest {
+    const placed = placement.place({
+      auth: resolved.auth,
+      branding: resolved.branding,
+    })
+    return this.resolve(placed) as PlacedManifest
   }
 
   /** Resolves and hashes in one go: the manifest's identity under this registry. */

@@ -5,33 +5,53 @@ import {
   runMigrations,
   type SecretSource,
 } from '@khatm/auth'
-import type {
-  ActiveState,
-  Artifacts,
-  MigrationPlan,
-  Migrator,
-  SecretResolver,
-  Traffic,
-  Worker,
-  Workers,
+import {
+  type ActiveState,
+  type Artifacts,
+  type MigrationPlan,
+  type Migrator,
+  type SecretResolver,
+  type Traffic,
+  trustedOrigins,
+  type Worker,
+  type Workers,
 } from '@khatm/deployment'
 import type { Bundles } from './bundles.ts'
-import type { ResolvedManifest, SecretFingerprints } from '@khatm/spec'
+import { defaultRegistry } from '@khatm/registry'
+import {
+  type PlacedManifest,
+  Placement,
+  type ResolvedManifest,
+  type SecretFingerprints,
+} from '@khatm/spec'
 import {
   freePort,
   ManagedProcess,
   type SwitchableProxy,
 } from '@khatm-libs/supervisor'
 
+/**
+ * Migrates the database the manifest names in this deployment. Planning
+ * places the manifest first, so one that doesn't fit the deployment fails
+ * the plan, like a secret that doesn't resolve.
+ */
 export class BetterAuthMigrator implements Migrator {
-  constructor(private readonly source: SecretSource = processSecrets) {}
+  private readonly placement: Placement
+
+  constructor(private readonly source: SecretSource = processSecrets) {
+    this.placement = new Placement((name) => source.env(name))
+  }
 
   plan(resolved: ResolvedManifest): Promise<MigrationPlan> {
-    return planMigrations(resolved, this.source)
+    return planMigrations(this.place(resolved), this.source)
   }
 
   run(resolved: ResolvedManifest): Promise<void> {
-    return runMigrations(resolved, this.source)
+    return runMigrations(this.place(resolved), this.source)
+  }
+
+  private place(resolved: ResolvedManifest): PlacedManifest {
+    return defaultRegistry().place(resolved, this.placement)
   }
 }
 
@@ -72,6 +92,13 @@ export class ProcessWorkers implements Workers {
   ) {}
 
   start(resolved: ResolvedManifest): Promise<Worker> {
+    // Placed as the worker will place it, in the same environment, so a
+    // manifest that doesn't fit fails here and the health check asks the
+    // origins the worker really trusts.
+    const placed = defaultRegistry().place(
+      resolved,
+      new Placement((name) => this.env[name] ?? Deno.env.get(name)),
+    )
     const port = freePort()
     const adminPort = freePort()
     const id = `worker-${++this.count}`
@@ -92,6 +119,7 @@ export class ProcessWorkers implements Workers {
       id,
       upstream: `http://127.0.0.1:${port}`,
       admin: { url: `http://127.0.0.1:${adminPort}`, token: this.adminToken },
+      trustedOrigins: trustedOrigins(placed),
       get alive() {
         return process.alive
       },

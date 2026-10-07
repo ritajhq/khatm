@@ -1,5 +1,5 @@
 import { assert, assertEquals } from '@std/assert'
-import type { Application } from '@khatm/spec'
+import type { Application, Placed } from '@khatm/spec'
 import { type Auth, createAuth } from './create-auth.ts'
 import { runMigrations } from './migrations.ts'
 import { OAuthClients } from './oauth-clients.ts'
@@ -15,7 +15,7 @@ const REDIRECT = 'http://partner.localhost/callback'
 const CLIENT_SECRET = 'partner-client-secret-with-plenty-of-entropy'
 const VERIFIER = 'a-pkce-code-verifier-that-is-long-enough-to-be-valid-43chars'
 
-const APPLICATIONS: Application[] = [
+const APPLICATIONS: Placed<Application>[] = [
   { kind: 'first-party', id: 'dashboard', origin: 'http://localhost:3000' },
   {
     kind: 'oauth',
@@ -173,7 +173,7 @@ Deno.test('OAuthClients: signed out, authorize sends the user to the login page,
 Deno.test('OAuthClients: an app dropped from the manifest is deleted on the next sync', async () => {
   await withOAuth(async (auth, clients) => {
     await clients.sync([APPLICATIONS[0], {
-      ...APPLICATIONS[1] as Extract<Application, { kind: 'oauth' }>,
+      ...APPLICATIONS[1] as Extract<Placed<Application>, { kind: 'oauth' }>,
       id: 'other',
     }])
     const cookie = await signUp(auth)

@@ -50,6 +50,12 @@ export interface Worker {
   readonly upstream: string
   /** The internal admin surface, never proxied, and the token it takes. */
   readonly admin?: { readonly url: string; readonly token: string }
+  /**
+   * The origins it trusts, read from the deployment as the worker placed the
+   * manifest: the health check asks each for a CORS preflight. Left out, the
+   * manifest's own trusted origins.
+   */
+  readonly trustedOrigins?: readonly string[]
   readonly alive: boolean
   /** Resolves when the process ends, whatever the reason. */
   readonly exited: Promise<void>

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { placeable } from './env-ref.ts'
 
 const Domain = z.string().regex(
   /^(?!-)[a-z0-9-]+(\.[a-z0-9-]+)+$/,
@@ -12,9 +13,9 @@ const Domain = z.string().regex(
  */
 export const SessionContract = z.object({
   /** Shared parent domain the session cookie is scoped to. */
-  cookieDomain: Domain.optional(),
+  cookieDomain: placeable(Domain).optional(),
   /** The internal get-session address guards call, never the public one. */
-  introspectionURL: z.url(),
+  introspectionURL: placeable(z.url()),
   /** The issuer guards report to policies, such as `portal`. */
   issuer: z.string().min(1),
   /** User fields exposed to guards as claims. */

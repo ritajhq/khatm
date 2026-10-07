@@ -1,7 +1,22 @@
-import type { ResolvedManifest, SecretRef } from '@khatm/spec'
+import { isEnvRef, type ResolvedManifest, type SecretRef } from '@khatm/spec'
 
 function literal(value: unknown): string {
   return JSON.stringify(value)
+}
+
+/**
+ * `value` as code, written like JSON, except that a value the deployment
+ * supplies is read from its environment, as Better Auth would be given it.
+ * Recursive: the value is a tree.
+ */
+function placeable(value: unknown): string {
+  if (isEnvRef(value)) return `Deno.env.get(${literal(value.env)})!`
+  if (Array.isArray(value)) return `[${value.map(placeable).join(',')}]`
+  if (typeof value !== 'object' || value === null) return literal(value)
+  const entries = Object.entries(value).map(([key, entry]) =>
+    `${literal(key)}:${placeable(entry)}`
+  )
+  return `{${entries.join(',')}}`
 }
 
 function secret(ref: SecretRef): string {
@@ -81,11 +96,11 @@ export function ejectAuth(
   const cookies = resolved.derived['advanced.crossSubDomainCookies']?.value
 
   const lines = [
-    `baseURL: ${literal(auth.baseURL)},`,
+    `baseURL: ${placeable(auth.baseURL)},`,
     `secrets: [\n${secrets}\n  ],`,
     `database: ${databaseCode},`,
   ]
-  if (origins) lines.push(`trustedOrigins: ${literal(origins)},`)
+  if (origins) lines.push(`trustedOrigins: ${placeable(origins)},`)
   if (auth.emailAndPassword) {
     lines.push(`emailAndPassword: {
     enabled: ${auth.emailAndPassword.enabled},
@@ -107,7 +122,7 @@ export function ejectAuth(
     )
   }
   if (cookies) {
-    lines.push(`advanced: { crossSubDomainCookies: ${literal(cookies)} },`)
+    lines.push(`advanced: { crossSubDomainCookies: ${placeable(cookies)} },`)
   }
   if (auth.hooks.length > 0) {
     lines.push(

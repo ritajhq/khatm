@@ -7,7 +7,7 @@ import {
   toYaml,
 } from '@khatm/contract/guard'
 import { defaultRegistry } from '@khatm/registry'
-import { parseManifest } from '@khatm/spec'
+import { parseManifest, Placement } from '@khatm/spec'
 import { parse as parseYaml } from '@std/yaml'
 import type { PlanView, RevisionView } from '@khatm/contract'
 import { IDENTITY_USAGE, runIdentity } from './identity.ts'
@@ -124,8 +124,12 @@ export async function run(
       return 2
     }
     try {
-      const resolved = defaultRegistry().resolve(
-        parseManifest(await readManifest(io, file)),
+      // Placed in this shell's environment: a guard manifest names the session
+      // URL and cookie as the deployment it is for runs them.
+      const registry = defaultRegistry()
+      const resolved = registry.place(
+        registry.resolve(parseManifest(await readManifest(io, file))),
+        new Placement((name) => Deno.env.get(name)),
       )
       io.out(toYaml(
         surface === 'control'

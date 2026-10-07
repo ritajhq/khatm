@@ -43,6 +43,7 @@ export {
   type Derived,
   digestOf,
   type ManifestDigest,
+  type PlacedManifest,
   resolve,
   type ResolvedManifest,
 } from './resolve.ts'
@@ -56,3 +57,10 @@ export {
 } from './secret.ts'
 export { SessionContract } from './session-contract.ts'
 export { SERVICE_USER } from './service-user.ts'
+export { EnvRef, isEnvRef, placeable, type Placed } from './env-ref.ts'
+export {
+  type EnvSource,
+  Placement,
+  type Reading,
+  UnplaceableManifestError,
+} from './placement.ts'

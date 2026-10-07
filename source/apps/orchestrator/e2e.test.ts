@@ -25,18 +25,22 @@ function authored(
   applications: string[],
 ) {
   return {
+    // Where it runs and who it starts with come from the deployment, as
+    // they would for a manifest shared by several environments.
     bootstrap: {
-      users: [{ email: 'root@example.com', name: 'Root', role: 'admin' }],
+      users: [{ email: { env: 'ADMIN_EMAIL' }, name: 'Root', role: 'admin' }],
     },
     auth: {
-      baseURL: ORIGIN,
+      baseURL: { env: 'AUTH_BASE_URL' },
       secrets: [{ version: 1, value: { env: 'AUTH_SECRET' } }],
       database: { url: { env: 'DATABASE' }, ...database },
       emailAndPassword: { enabled: true },
       applications: applications.map((id) => ({
         kind: 'first-party',
         id,
-        origin: `http://${id}.localhost:3000`,
+        origin: id === 'dashboard'
+          ? { env: 'DASHBOARD_ORIGIN' }
+          : `http://${id}.localhost:3000`,
       })),
       session: {
         introspectionURL: `${ORIGIN}/api/auth/get-session`,
@@ -86,6 +90,9 @@ async function scenario(
   const values: Record<string, string> = {
     AUTH_SECRET: 'end-to-end-secret-with-plenty-of-entropy-0001',
     DATABASE: databaseUrl,
+    AUTH_BASE_URL: ORIGIN,
+    DASHBOARD_ORIGIN: 'http://dashboard.localhost:3000',
+    ADMIN_EMAIL: 'root@example.com',
   }
   let broken: BrokenNext | undefined
   const runtime = await createRuntime({
@@ -257,6 +264,8 @@ async function scenario(
       findings.filter((f) => f.severity !== 'info')
         .map((f) => `${f.severity} ${f.check}`),
       [
+        'ok placement',
+        'ok placement',
         'ok base-url',
         // The apps are on *.localhost with no cookie domain: true, and worth saying.
         'warn cookie-domain',

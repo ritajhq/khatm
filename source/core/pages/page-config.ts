@@ -1,6 +1,6 @@
 import {
   landingApplication,
-  type ResolvedManifest,
+  type PlacedManifest,
   sanitizeSlot,
   SlotName,
 } from '@khatm/spec'
@@ -31,7 +31,7 @@ export const PageConfig = z.object({
 })
 export type PageConfig = z.infer<typeof PageConfig>
 
-export function pageConfig(resolved: ResolvedManifest): PageConfig {
+export function pageConfig(resolved: PlacedManifest): PageConfig {
   const { auth } = resolved
   const firstParty = auth.applications.filter((a) => a.kind === 'first-party')
   return {

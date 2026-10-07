@@ -5,8 +5,9 @@ import { parseManifest } from '@khatm/spec'
 import { freePort } from '@khatm-libs/supervisor'
 import { createRuntime } from './runtime.ts'
 
-const CHROMIUM = '/opt/pw-browsers/chromium'
-const DIST = new URL('../../artifacts/login/index.html', import.meta.url).pathname
+const CHROMIUM = Deno.env.get('CHROMIUM') ?? '/opt/pw-browsers/chromium'
+const DIST =
+  new URL('../../artifacts/login/index.html', import.meta.url).pathname
 const WORKER = new URL('../worker/main.ts', import.meta.url).pathname
 const available = (() => {
   try {

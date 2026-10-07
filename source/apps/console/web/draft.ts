@@ -2,7 +2,9 @@ import { type PageConfig, pageConfig } from '@khatm/pages'
 import { defaultRegistry, UnresolvableManifestError } from '@khatm/registry'
 import {
   InvalidManifestError,
+  isEnvRef,
   parseManifest,
+  type PlacedManifest,
   type ResolvedManifest,
 } from '@khatm/spec'
 
@@ -142,11 +144,28 @@ export function previewQuery(resolved: ResolvedManifest): string {
     tokens: Record<string, string>
     parts: Record<string, Record<string, string>>
   } = {
-    config: pageConfig(resolved),
+    config: pageConfig(previewable(resolved)),
     tokens: resolved.branding.tokens,
     parts: resolved.branding.parts ?? {},
   }
   const bytes = new TextEncoder().encode(JSON.stringify(draft))
   return btoa(String.fromCharCode(...bytes))
     .replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
+}
+
+/**
+ * `resolved` as the preview can show it: the browser has no deployment to
+ * read references from, and the preview never sends anyone back to an app,
+ * so apps whose origin comes from the deployment are left out.
+ */
+function previewable(resolved: ResolvedManifest): PlacedManifest {
+  return {
+    ...resolved,
+    auth: {
+      ...resolved.auth,
+      applications: resolved.auth.applications.filter((app) =>
+        app.kind !== 'first-party' || !isEnvRef(app.origin)
+      ),
+    },
+  } as PlacedManifest
 }

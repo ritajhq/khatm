@@ -1,5 +1,6 @@
 import { assertEquals, assertThrows } from '@std/assert'
 import { defaultRegistry } from '@khatm/registry'
+import { placed } from '@khatm/registry/test-fixtures'
 import { parseManifest } from '@khatm/spec'
 import { createAuth, UnknownCapabilityError } from './create-auth.ts'
 import { planMigrations, runMigrations } from './migrations.ts'
@@ -171,7 +172,7 @@ Deno.test('createAuth: capability hooks are refused until the registry has them'
     },
   }))
   assertThrows(
-    () => createAuth(resolved, fakeSource(secretValues('/tmp/x.db'))),
+    () => createAuth(placed(resolved), fakeSource(secretValues('/tmp/x.db'))),
     UnknownCapabilityError,
   )
   void BASE_URL

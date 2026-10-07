@@ -69,6 +69,45 @@ doesn't change the manifest. khatm still notices: at apply time it records a
 fingerprint of each value (a keyed hash, never the value itself), and `plan`
 reports "value changed behind `env:AUTH_SECRET`" as its own step.
 
+## Where it runs: values from the deployment
+
+One manifest can serve every environment, development and production alike.
+Where a field says where the service runs, or who it starts with, it can name
+an environment variable instead of a value:
+
+```json
+"baseURL": { "env": "AUTH_BASE_URL" }
+```
+
+| Field | Notes |
+| --- | --- |
+| `auth.baseURL` | |
+| `auth.session.cookieDomain` | |
+| `auth.session.introspectionURL` | |
+| `auth.applications[].origin` | First-party applications |
+| `auth.applications[].redirectUris[]` | OAuth applications |
+| `bootstrap.users[].email` | Optional: where the variable isn't set, that user isn't created |
+
+They behave unlike secrets in three ways:
+
+- **The manifest's digest covers the reference, not the value.** The same
+  manifest has the same digest wherever it runs, and `plan` never sees the
+  values. Changing one means redeploying khatm, which restarts it, and the
+  active revision then runs with what the new environment holds.
+- **khatm places the manifest before it uses it.** It reads every reference,
+  then checks what it read the way it checks a written value: each origin
+  must be exact and inside the cookie domain, and no two apps may share one.
+  A variable that isn't set, or a value that doesn't fit, fails the plan with
+  `unplaceable_manifest` and stops a worker from starting.
+- **Their values may be shown.** `khatm doctor` lists each reference and what
+  it read. The ejected `auth.ts` reads them with `Deno.env.get`, as it does
+  secrets.
+
+Two places can't read them. `khatm guard` reads them from the shell it runs
+in, so set the variables for the deployment you are generating guard
+manifests for. The console's branding preview runs in the browser and leaves
+out apps whose origin comes from a variable.
+
 ## `auth`
 
 ### `baseURL` (required)

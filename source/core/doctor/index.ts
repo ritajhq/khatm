@@ -4,6 +4,7 @@ export {
   type Finding,
   guardFindings,
   type GuardManifest,
+  placementFindings,
   type Probes,
   runtimeFindings,
   type Severity,

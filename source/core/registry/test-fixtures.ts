@@ -1,4 +1,11 @@
-import { type Manifest, parseManifest } from '@khatm/spec'
+import {
+  type Manifest,
+  parseManifest,
+  type PlacedManifest,
+  Placement,
+  type ResolvedManifest,
+} from '@khatm/spec'
+import { defaultRegistry } from './registry.ts'
 
 /**
  * Portal on its feat/authorization branch, written as a khatm manifest:
@@ -43,4 +50,13 @@ export function portal(
       users: [{ email: 'admin@ritaj.app', name: 'Admin', role: 'admin' }],
     },
   })
+}
+
+/**
+ * `resolved` placed in a deployment that sets no variables: fixtures write
+ * every value out, so placing changes nothing, and the result can go where a
+ * worker's would.
+ */
+export function placed(resolved: ResolvedManifest): PlacedManifest {
+  return defaultRegistry().place(resolved, new Placement(() => undefined))
 }

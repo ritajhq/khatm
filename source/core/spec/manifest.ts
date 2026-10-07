@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { AuthSpec } from './auth-spec.ts'
 import { BrandingSpec } from './branding.ts'
+import { placeable } from './env-ref.ts'
 
 /**
  * Users created on first boot only, such as portal's first admin. Later
@@ -9,7 +10,9 @@ import { BrandingSpec } from './branding.ts'
 export const BootstrapSpec = z.object({
   users: z.array(
     z.object({
-      email: z.email(),
+      // From the environment, a user is only created where it is set: a dev
+      // admin in development, none in production.
+      email: placeable(z.email()),
       name: z.string().min(1),
       role: z.string().min(1).optional(),
     }).strict(),

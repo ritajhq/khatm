@@ -1,7 +1,7 @@
 import { assertEquals } from '@std/assert'
 import { parse } from '@std/yaml'
 import { defaultRegistry } from '@khatm/registry'
-import { portal } from '@khatm/registry/test-fixtures'
+import { placed, portal } from '@khatm/registry/test-fixtures'
 import {
   consoleGuardManifest,
   controlGuardManifest,
@@ -10,7 +10,7 @@ import {
 } from './guard.ts'
 import { procedures } from './procedures.ts'
 
-const resolved = defaultRegistry().resolve(portal())
+const resolved = placed(defaultRegistry().resolve(portal()))
 
 Deno.test('controlGuardManifest: one action per procedure, none left unguarded', () => {
   const manifest = controlGuardManifest(resolved)

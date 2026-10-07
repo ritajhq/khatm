@@ -1,5 +1,6 @@
 import { assertEquals, assertRejects, assertStringIncludes } from '@std/assert'
 import { defaultRegistry } from '@khatm/registry'
+import { placed, portal } from '@khatm/registry/test-fixtures'
 import { createAuth } from '@khatm/auth'
 import { digestOf, parseManifest, type ResolvedManifest } from '@khatm/spec'
 import {
@@ -8,6 +9,7 @@ import {
   BundleMismatchError,
   verifyBundle,
 } from './bundle.ts'
+import { ejectAuth } from './eject.ts'
 
 function authored(overrides: Record<string, unknown> = {}) {
   return {
@@ -150,7 +152,7 @@ Deno.test('eject: auth.ts is plain Better Auth that builds what khatm would', as
     Deno.writeTextFileSync(`${dir}/auth.ts`, bundle['auth.ts'])
     const { auth: ejected } = await import(`${dir}/auth.ts`)
     const { auth: built, close } = createAuth(
-      (await input()).resolved,
+      placed((await input()).resolved),
       {
         env: (n) => env[n as keyof typeof env],
         readFile: Deno.readTextFileSync,
@@ -179,4 +181,31 @@ Deno.test('eject: auth.ts is plain Better Auth that builds what khatm would', as
     for (const name of Object.keys(env)) Deno.env.delete(name)
     Deno.removeSync(dir, { recursive: true })
   }
+})
+
+Deno.test('ejectAuth: what the deployment supplies is read from its environment', () => {
+  const resolved = defaultRegistry().resolve(portal({
+    baseURL: { env: 'AUTH_BASE_URL' },
+    applications: [{
+      kind: 'first-party',
+      id: 'dashboard',
+      origin: { env: 'DASHBOARD_ORIGIN' },
+    }],
+    session: {
+      cookieDomain: { env: 'AUTH_COOKIE_DOMAIN' },
+      introspectionURL: 'http://auth:4100/api/auth/get-session',
+      issuer: 'portal',
+      claims: ['email'],
+    },
+  }))
+  const code = ejectAuth(resolved, { revision: 'r1', manifest: 'm1' })
+  assertStringIncludes(code, 'baseURL: Deno.env.get("AUTH_BASE_URL")!,')
+  assertStringIncludes(
+    code,
+    'trustedOrigins: [Deno.env.get("DASHBOARD_ORIGIN")!],',
+  )
+  assertStringIncludes(
+    code,
+    'crossSubDomainCookies: {"enabled":true,"domain":Deno.env.get("AUTH_COOKIE_DOMAIN")!}',
+  )
 })

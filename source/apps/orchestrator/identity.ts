@@ -1,6 +1,6 @@
 import { ErrorBody } from '@khatm/contract'
 import type { Deployment } from '@khatm/deployment'
-import { BootstrapSpec } from '@khatm/spec'
+import { BootstrapSpec, type Placement } from '@khatm/spec'
 import { ControlError } from './errors.ts'
 import type { SqlClient } from './sql.ts'
 import { claimOnce, isDone, type SqlAuditLog } from './stores.ts'
@@ -47,7 +47,8 @@ export const KHATM_ACTOR = 'khatm'
  * one: creates the users it names that don't exist yet and gives them their
  * roles. After that it never runs again, and later edits to the block are
  * ignored. Each step is idempotent, so a failed run is simply retried on the
- * next activation or start.
+ * next activation or start. A user whose email comes from a variable this
+ * deployment doesn't set is not created here.
  */
 export class Bootstrap {
   private running: Promise<void> | undefined
@@ -57,6 +58,7 @@ export class Bootstrap {
     private readonly deployment: Pick<Deployment, 'activeState'>,
     private readonly admin: WorkerAdmin,
     private readonly audit: SqlAuditLog,
+    private readonly placement: Placement,
   ) {}
 
   /** Runs at most one pass at a time. */
@@ -72,7 +74,9 @@ export class Bootstrap {
     const state = this.deployment.activeState
     const authored = state?.authored as { bootstrap?: unknown } | undefined
     if (!state || authored?.bootstrap === undefined) return
-    const spec = BootstrapSpec.parse(authored.bootstrap)
+    const spec = this.placement.bootstrap(
+      BootstrapSpec.parse(authored.bootstrap),
+    )
     const revision = state.revision.id
 
     for (const user of spec.users) {

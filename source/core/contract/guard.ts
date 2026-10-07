@@ -1,5 +1,5 @@
 import { stringify } from '@std/yaml'
-import type { ResolvedManifest } from '@khatm/spec'
+import type { PlacedManifest } from '@khatm/spec'
 import { procedures } from './procedures.ts'
 
 /** A fact a policy can use, read from the procedure's JSON body. */
@@ -74,7 +74,7 @@ export function sessionCookieName(baseURL: string): string {
   return baseURL.startsWith('https://') ? `__Secure-${name}` : name
 }
 
-function authentication(resolved: ResolvedManifest) {
+function authentication(resolved: PlacedManifest) {
   const { session, baseURL } = resolved.auth
   return [{
     scheme: 'session-cookie',
@@ -91,7 +91,7 @@ function authentication(resolved: ResolvedManifest) {
  * generated from the contract, so a new procedure can't be left unguarded.
  * The policies deciding who may do what stay the consumer's.
  */
-export function controlGuardManifest(resolved: ResolvedManifest) {
+export function controlGuardManifest(resolved: PlacedManifest) {
   return {
     id: 'khatm_control',
     protocol: 'http',
@@ -120,7 +120,7 @@ export function controlGuardManifest(resolved: ResolvedManifest) {
  * control call it relays is another, so a policy can let someone look without
  * letting them apply. The control API's own guard still checks every call.
  */
-export function consoleGuardManifest(resolved: ResolvedManifest) {
+export function consoleGuardManifest(resolved: PlacedManifest) {
   return {
     id: 'khatm_console',
     protocol: 'http',

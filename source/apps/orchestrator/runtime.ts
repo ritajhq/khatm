@@ -8,12 +8,20 @@ import {
 } from '@khatm/auth'
 import {
   configFindings,
+  failed,
   type Finding,
   guardFindings,
   type GuardManifest,
+  placementFindings,
   runtimeFindings,
 } from '@khatm/doctor'
-import type { ResolvedManifest } from '@khatm/spec'
+import { defaultRegistry } from '@khatm/registry'
+import {
+  type PlacedManifest,
+  Placement,
+  type ResolvedManifest,
+  UnplaceableManifestError,
+} from '@khatm/spec'
 import {
   Deployment,
   type DeploymentEvent,
@@ -116,7 +124,14 @@ export async function createRuntime(config: RuntimeConfig): Promise<Runtime> {
     },
   }, config.deployment)
   const admin = new WorkerAdmin(deployment)
-  const bootstrap = new Bootstrap(client, deployment, admin, audit)
+  const source = config.secrets ?? processSecrets
+  const bootstrap = new Bootstrap(
+    client,
+    deployment,
+    admin,
+    audit,
+    new Placement((name) => source.env(name)),
+  )
   return {
     deployment,
     store,
@@ -127,8 +142,29 @@ export async function createRuntime(config: RuntimeConfig): Promise<Runtime> {
     audit,
     admin,
     bootstrap,
-    async doctor(resolved, guards) {
-      const source = config.secrets ?? processSecrets
+    async doctor(unplaced, guards) {
+      const placement = new Placement((name) => source.env(name))
+      const placing = placementFindings(
+        placement.readings({
+          auth: unplaced.auth,
+          branding: unplaced.branding,
+        }),
+      )
+      let resolved: PlacedManifest
+      try {
+        resolved = defaultRegistry().place(unplaced, placement)
+      } catch (error) {
+        if (!(error instanceof UnplaceableManifestError)) throw error
+        // Nothing else can be checked as this deployment would run it.
+        return failed(placing) ? placing : [
+          ...placing,
+          ...error.problems.map((message): Finding => ({
+            check: 'placement',
+            severity: 'fail',
+            message,
+          })),
+        ]
+      }
       const runtime = await runtimeFindings(resolved, {
         missingSecrets() {
           try {
@@ -165,6 +201,7 @@ export async function createRuntime(config: RuntimeConfig): Promise<Runtime> {
         upstream: proxy.upstream,
       })
       return [
+        ...placing,
         ...configFindings(resolved),
         ...runtime,
         ...guardFindings(resolved, guards),

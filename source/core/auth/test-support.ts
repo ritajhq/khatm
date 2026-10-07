@@ -1,5 +1,5 @@
 import { defaultRegistry } from '@khatm/registry'
-import { parseManifest, type ResolvedManifest } from '@khatm/spec'
+import { parseManifest, type PlacedManifest, Placement } from '@khatm/spec'
 import type { Auth } from './create-auth.ts'
 import type { SecretSource } from './secrets.ts'
 
@@ -18,29 +18,33 @@ export function fakeSource(
   }
 }
 
-/** A resolved single-host manifest over a SQLite file, with the given overrides on its auth spec. */
+/** A resolved and placed single-host manifest over a SQLite file, with the given overrides on its auth spec. */
 export function resolvedSqlite(
   overrides: Record<string, unknown> = {},
-): ResolvedManifest {
-  return defaultRegistry().resolve(parseManifest({
-    auth: {
-      baseURL: BASE_URL,
-      secrets: [{ version: 1, value: { env: 'AUTH_SECRET_1' } }],
-      database: { dialect: 'sqlite', url: { env: 'DATABASE' } },
-      emailAndPassword: { enabled: true },
-      applications: [{
-        kind: 'first-party',
-        id: 'dashboard',
-        origin: 'http://localhost:3000',
-      }],
-      session: {
-        introspectionURL: 'http://localhost:4100/api/auth/get-session',
-        issuer: 'test',
-        claims: ['email', 'name'],
+): PlacedManifest {
+  const registry = defaultRegistry()
+  return registry.place(
+    registry.resolve(parseManifest({
+      auth: {
+        baseURL: BASE_URL,
+        secrets: [{ version: 1, value: { env: 'AUTH_SECRET_1' } }],
+        database: { dialect: 'sqlite', url: { env: 'DATABASE' } },
+        emailAndPassword: { enabled: true },
+        applications: [{
+          kind: 'first-party',
+          id: 'dashboard',
+          origin: 'http://localhost:3000',
+        }],
+        session: {
+          introspectionURL: 'http://localhost:4100/api/auth/get-session',
+          issuer: 'test',
+          claims: ['email', 'name'],
+        },
+        ...overrides,
       },
-      ...overrides,
-    },
-  }))
+    })),
+    new Placement(() => undefined),
+  )
 }
 
 export function secretValues(database: string): Record<string, string> {

@@ -26,6 +26,7 @@ import {
   type Json,
   parseManifest,
   type Revision,
+  UnplaceableManifestError,
 } from '@khatm/spec'
 import { ControlError } from './errors.ts'
 import type { Runtime } from './runtime.ts'
@@ -413,6 +414,9 @@ function classify(
   }
   if (error instanceof UnresolvedSecretsError) {
     return ['unresolved_secrets', error.message, { details: error.refs }]
+  }
+  if (error instanceof UnplaceableManifestError) {
+    return ['unplaceable_manifest', error.message, { details: error.problems }]
   }
   if (error instanceof BlockedPlanError) {
     return ['blocked', error.message, { steps: steps(error.steps) }]

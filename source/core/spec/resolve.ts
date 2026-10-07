@@ -1,3 +1,4 @@
+import type { Placed } from './env-ref.ts'
 import type { AuthSpec } from './auth-spec.ts'
 import type { BrandingSpec } from './branding.ts'
 import { sha256 } from './canonical.ts'
@@ -71,3 +72,10 @@ export function digestOf(resolved: ResolvedManifest): Promise<ManifestDigest> {
 }
 
 export class ConflictingDerivationError extends Error {}
+
+/**
+ * A resolved manifest placed in one deployment: every `EnvRef` read, and
+ * everything derived from them derived again from what was read. What a
+ * worker, the hosted pages and the guard manifests are built from.
+ */
+export type PlacedManifest = Placed<ResolvedManifest>

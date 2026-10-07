@@ -1,5 +1,5 @@
 import { sessionCookieName } from '@khatm/contract/guard'
-import { isWithinDomain, type ResolvedManifest } from '@khatm/spec'
+import { isWithinDomain, type PlacedManifest, type Reading } from '@khatm/spec'
 
 /**
  * `ok` passed, `info` is something to know or do (like a redirect URI to
@@ -22,11 +22,32 @@ export function failed(findings: readonly Finding[]): boolean {
 }
 
 /**
+ * What this deployment's environment supplies for the manifest: each value
+ * read, and each reference nothing is set for. One that isn't set stops a
+ * worker from starting, so it fails.
+ */
+export function placementFindings(readings: readonly Reading[]): Finding[] {
+  return readings.map((reading) =>
+    reading.value === undefined
+      ? {
+        check: 'placement',
+        severity: 'fail',
+        message: `${reading.path}: ${reading.env} is not set`,
+      }
+      : {
+        check: 'placement',
+        severity: 'ok',
+        message: `${reading.path} = ${reading.value} (from ${reading.env})`,
+      }
+  )
+}
+
+/**
  * What can be told from the manifest alone: base URL consistency, whether
  * the session cookie reaches the service's apps, and the OAuth redirect URIs
  * to register with each provider.
  */
-export function configFindings(resolved: ResolvedManifest): Finding[] {
+export function configFindings(resolved: PlacedManifest): Finding[] {
   const { auth, branding } = resolved
   const findings: Finding[] = []
   const base = new URL(auth.baseURL)
@@ -142,7 +163,7 @@ interface CookieScheme {
  * every request, or forwards a claim that is never there.
  */
 export function guardFindings(
-  resolved: ResolvedManifest,
+  resolved: PlacedManifest,
   guards: readonly GuardManifest[],
 ): Finding[] {
   const { session, baseURL } = resolved.auth
@@ -220,7 +241,7 @@ export interface Probes {
 }
 
 export async function runtimeFindings(
-  resolved: ResolvedManifest,
+  resolved: PlacedManifest,
   probes: Probes,
 ): Promise<Finding[]> {
   const findings: Finding[] = []

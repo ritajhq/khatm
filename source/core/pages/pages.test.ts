@@ -1,5 +1,6 @@
 import { assertEquals } from '@std/assert'
 import { defaultRegistry } from '@khatm/registry'
+import { placed } from '@khatm/registry/test-fixtures'
 import { InvalidManifestError, parseManifest } from '@khatm/spec'
 import {
   chooseLocale,
@@ -12,43 +13,45 @@ import {
 } from './index.ts'
 
 function resolved(auth: Record<string, unknown> = {}, branding = {}) {
-  return defaultRegistry().resolve(parseManifest({
-    auth: {
-      baseURL: 'https://auth.example.com',
-      secrets: [{ version: 1, value: { env: 'S' } }],
-      database: { dialect: 'sqlite', url: { env: 'D' } },
-      emailAndPassword: { enabled: true },
-      plugins: [{ kind: 'username' }],
-      applications: [
-        {
-          kind: 'first-party',
-          id: 'admin',
-          origin: 'https://admin.example.com',
+  return placed(
+    defaultRegistry().resolve(parseManifest({
+      auth: {
+        baseURL: 'https://auth.example.com',
+        secrets: [{ version: 1, value: { env: 'S' } }],
+        database: { dialect: 'sqlite', url: { env: 'D' } },
+        emailAndPassword: { enabled: true },
+        plugins: [{ kind: 'username' }],
+        applications: [
+          {
+            kind: 'first-party',
+            id: 'admin',
+            origin: 'https://admin.example.com',
+          },
+          {
+            kind: 'first-party',
+            id: 'dashboard',
+            origin: 'https://dashboard.example.com',
+            landing: true,
+          },
+          {
+            kind: 'oauth',
+            id: 'thirdparty',
+            redirectUris: ['https://third.example.org/cb'],
+            scopes: ['openid'],
+            confidential: true,
+            clientSecret: { env: 'THIRDPARTY_SECRET' },
+          },
+        ],
+        session: {
+          introspectionURL: 'http://auth:4100/api/auth/get-session',
+          issuer: 'example',
+          claims: ['email'],
         },
-        {
-          kind: 'first-party',
-          id: 'dashboard',
-          origin: 'https://dashboard.example.com',
-          landing: true,
-        },
-        {
-          kind: 'oauth',
-          id: 'thirdparty',
-          redirectUris: ['https://third.example.org/cb'],
-          scopes: ['openid'],
-          confidential: true,
-          clientSecret: { env: 'THIRDPARTY_SECRET' },
-        },
-      ],
-      session: {
-        introspectionURL: 'http://auth:4100/api/auth/get-session',
-        issuer: 'example',
-        claims: ['email'],
+        ...auth,
       },
-      ...auth,
-    },
-    branding,
-  }))
+      branding,
+    })),
+  )
 }
 
 Deno.test('pageConfig: shows what the auth spec turns on and nothing secret', () => {

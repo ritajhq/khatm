@@ -1,4 +1,4 @@
-import type { Application, OAuthApplication } from '@khatm/spec'
+import type { Application, OAuthApplication, Placed } from '@khatm/spec'
 import { ClientSecretHash } from './client-secret.ts'
 import type { Auth } from './create-auth.ts'
 import { processSecrets, resolveSecret, type SecretSource } from './secrets.ts'
@@ -46,10 +46,10 @@ export class OAuthClients {
       .then((context) => context.adapter)
   }
 
-  async sync(applications: readonly Application[]): Promise<void> {
-    const declared = applications.filter((app): app is OAuthApplication =>
-      app.kind === 'oauth'
-    )
+  async sync(applications: readonly Placed<Application>[]): Promise<void> {
+    const declared = applications.filter((
+      app,
+    ): app is Placed<OAuthApplication> => app.kind === 'oauth')
     // Without an OAuth application the provider isn't installed, so there
     // is no client table to keep in step.
     if (declared.length === 0) return
@@ -89,7 +89,7 @@ export class OAuthClients {
 
   /** The client row an application describes. Consent is skipped for every client for now. */
   private async row(
-    app: OAuthApplication,
+    app: Placed<OAuthApplication>,
     now: Date,
   ): Promise<Record<string, unknown>> {
     return {

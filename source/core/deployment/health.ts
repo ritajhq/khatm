@@ -51,7 +51,7 @@ export async function checkOnce(
     }
   })
 
-  for (const origin of trustedOrigins(resolved)) {
+  for (const origin of worker.trustedOrigins ?? trustedOrigins(resolved)) {
     await attempt(`preflight ${origin}`, async () => {
       const response = await probe(`${worker.upstream}/api/auth/get-session`, {
         method: 'OPTIONS',

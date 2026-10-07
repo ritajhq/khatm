@@ -340,6 +340,8 @@ export const ErrorCode = z.enum([
   'invalid_request',
   'invalid_manifest',
   'unresolved_secrets',
+  /** The deployment doesn't supply what the manifest takes from its environment, or what it supplies doesn't fit. */
+  'unplaceable_manifest',
   'unknown_procedure',
   'unknown_revision',
   'no_active_revision',
@@ -374,6 +376,7 @@ export const STATUS: Readonly<Record<ErrorCode, number>> = {
   invalid_request: 400,
   invalid_manifest: 400,
   unresolved_secrets: 422,
+  unplaceable_manifest: 422,
   unknown_procedure: 404,
   unknown_revision: 404,
   no_active_revision: 404,

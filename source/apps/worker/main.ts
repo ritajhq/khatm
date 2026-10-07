@@ -5,7 +5,8 @@ import {
   OAuthDiscovery,
 } from '@khatm/auth'
 import { createAdminHandler } from './admin.ts'
-import type { ResolvedManifest } from '@khatm/spec'
+import { defaultRegistry } from '@khatm/registry'
+import { Placement, type ResolvedManifest } from '@khatm/spec'
 import { pageConfig } from '@khatm/pages'
 import { createHandler } from './handler.ts'
 import { loadPages } from './pages.ts'
@@ -13,11 +14,16 @@ import { loadPages } from './pages.ts'
 /**
  * One Better Auth worker. The orchestrator writes the resolved manifest to
  * stdin and picks the ports; secrets come from this process's environment,
- * so their values never pass through the orchestrator's pipes.
+ * so their values never pass through the orchestrator's pipes, and so do the
+ * values the manifest takes from the deployment (its base URL, its origins),
+ * which the worker places it with before building anything.
  */
 async function main(): Promise<void> {
   const raw = await new Response(Deno.stdin.readable).text()
-  const resolved = JSON.parse(raw) as ResolvedManifest
+  const resolved = defaultRegistry().place(
+    JSON.parse(raw) as ResolvedManifest,
+    new Placement((name) => Deno.env.get(name)),
+  )
   const port = Number(Deno.env.get('PORT'))
   if (!Number.isInteger(port) || port <= 0) {
     throw new Error('PORT must be set to the port to listen on')

@@ -1,5 +1,5 @@
 import { getMigrations } from 'better-auth/db/migration'
-import type { ResolvedManifest } from '@khatm/spec'
+import type { PlacedManifest } from '@khatm/spec'
 import { createAuth } from './create-auth.ts'
 import { ensureSchema } from './database.ts'
 import { processSecrets, resolveSecret, type SecretSource } from './secrets.ts'
@@ -16,7 +16,7 @@ export interface MigrationPlan {
 
 /** Better Auth's migrator only ever adds, so this is what a plugin change costs. */
 export async function planMigrations(
-  resolved: ResolvedManifest,
+  resolved: PlacedManifest,
   source: SecretSource = processSecrets,
 ): Promise<MigrationPlan> {
   const { auth, close } = createAuth(resolved, source, { quiet: true })
@@ -40,7 +40,7 @@ export async function planMigrations(
 }
 
 export async function runMigrations(
-  resolved: ResolvedManifest,
+  resolved: PlacedManifest,
   source: SecretSource = processSecrets,
 ): Promise<void> {
   await ensureSchema(

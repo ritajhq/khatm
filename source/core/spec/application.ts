@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { Origin } from './origin.ts'
+import { isEnvRef, placeable } from './env-ref.ts'
 import { SecretRef } from './secret.ts'
 
 export const AppId = z.string().regex(/^[a-z][a-z0-9-]*$/, {
@@ -15,7 +16,7 @@ export const AppId = z.string().regex(/^[a-z][a-z0-9-]*$/, {
 export const FirstPartyApplication = z.object({
   kind: z.literal('first-party'),
   id: AppId,
-  origin: Origin,
+  origin: placeable(Origin),
   /** Where sign-in lands when no `return_to` is given. At most one app sets it. */
   landing: z.boolean().optional(),
 }).strict()
@@ -50,7 +51,7 @@ function isAllowedRedirect(value: string): boolean {
 export const OAuthApplication = z.object({
   kind: z.literal('oauth'),
   id: AppId,
-  redirectUris: z.array(RedirectUri).min(1),
+  redirectUris: z.array(placeable(RedirectUri)).min(1),
   scopes: z.array(z.string().min(1)),
   confidential: z.boolean(),
   clientSecret: SecretRef.optional(),
@@ -92,14 +93,16 @@ export const Applications = z.array(Application).superRefine((apps, ctx) => {
     }
     ids.add(app.id)
     if (app.kind !== 'first-party') continue
-    if (origins.has(app.origin)) {
+    // Two references to the same variable are the same origin too.
+    const origin = isEnvRef(app.origin) ? `env:${app.origin.env}` : app.origin
+    if (origins.has(origin)) {
       ctx.addIssue({
         code: 'custom',
         path: [index, 'origin'],
-        message: `Origin ${app.origin} belongs to two applications`,
+        message: `Origin ${origin} belongs to two applications`,
       })
     }
-    origins.add(app.origin)
+    origins.add(origin)
     if (app.landing) landings++
   }
   if (landings > 1) {
@@ -111,11 +114,13 @@ export const Applications = z.array(Application).superRefine((apps, ctx) => {
 })
 
 /** The app sign-in lands on: the one marked `landing`, else the first first-party app. */
-export function landingApplication(
-  apps: readonly Application[],
-): FirstPartyApplication | undefined {
-  const firstParty = apps.filter((app): app is FirstPartyApplication =>
-    app.kind === 'first-party'
-  )
+export function landingApplication<
+  A extends { readonly kind: string; readonly landing?: boolean },
+>(
+  apps: readonly A[],
+): Extract<A, { kind: 'first-party' }> | undefined {
+  const firstParty = apps.filter((
+    app,
+  ): app is Extract<A, { kind: 'first-party' }> => app.kind === 'first-party')
   return firstParty.find((app) => app.landing) ?? firstParty[0]
 }

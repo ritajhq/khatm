@@ -1,5 +1,5 @@
 import { betterAuth, type BetterAuthOptions } from 'better-auth'
-import type { ResolvedManifest } from '@khatm/spec'
+import type { PlacedManifest } from '@khatm/spec'
 import { openDatabase } from './database.ts'
 import { buildPlugin } from './plugins.ts'
 import { processSecrets, resolveSecret, type SecretSource } from './secrets.ts'
@@ -24,7 +24,7 @@ export interface CreatedAuth {
  * derived plugins all arrive through `resolved.derived`.
  */
 export function createAuth(
-  resolved: ResolvedManifest,
+  resolved: PlacedManifest,
   source: SecretSource = processSecrets,
   options: { quiet?: boolean } = {},
 ): CreatedAuth {
