@@ -167,7 +167,7 @@ export function guardFindings(
   guards: readonly GuardManifest[],
 ): Finding[] {
   const { session, baseURL } = resolved.auth
-  const cookie = sessionCookieName(baseURL)
+  const cookie = sessionCookieName(baseURL, session.cookiePrefix)
   const findings: Finding[] = []
   for (const guard of guards) {
     const check = `guard:${guard.name}`

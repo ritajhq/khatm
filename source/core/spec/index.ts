@@ -55,7 +55,7 @@ export {
   Secrets,
   VersionedSecret,
 } from './secret.ts'
-export { SessionContract } from './session-contract.ts'
+export { DEFAULT_COOKIE_PREFIX, SessionContract } from './session-contract.ts'
 export { SERVICE_USER } from './service-user.ts'
 export { EnvRef, isEnvRef, placeable, type Placed } from './env-ref.ts'
 export {

@@ -94,6 +94,35 @@ Deno.test('createAuth: signs up, then recognizes the session', async () => {
   }
 })
 
+Deno.test('createAuth: a session cookie prefix names the cookie it signs in with', async () => {
+  const db = tempDatabase()
+  const source = fakeSource(secretValues(db.path))
+  const manifest = resolvedSqlite({
+    session: {
+      cookiePrefix: 'platform',
+      introspectionURL: 'http://localhost:4100/api/auth/get-session',
+      issuer: 'test',
+      claims: ['email', 'name'],
+    },
+  })
+  try {
+    await runMigrations(manifest, source)
+    const { auth, close } = createAuth(manifest, source, { quiet: true })
+    try {
+      const cookie = await signUp(auth)
+      assertEquals(cookie.startsWith('platform.session_token='), true)
+      assertEquals(
+        (await sessionOf(auth, cookie))?.user.email,
+        'ada@example.com',
+      )
+    } finally {
+      await close()
+    }
+  } finally {
+    db.cleanup()
+  }
+})
+
 Deno.test('createAuth: derived plugins are built too (role claim brings the admin plugin)', async () => {
   const db = tempDatabase()
   const source = fakeSource(secretValues(db.path))

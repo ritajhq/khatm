@@ -2,6 +2,7 @@ export {
   fromAdministration,
   fromApplications,
   fromCookieDomain,
+  fromCookiePrefix,
   fromOAuthApplications,
 } from './derivations.ts'
 export type { PluginDefinition } from './plugin-definition.ts'

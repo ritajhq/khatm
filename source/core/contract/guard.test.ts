@@ -49,6 +49,13 @@ Deno.test('guard manifests: authenticate with the session contract portal publis
   )
 })
 
+Deno.test('sessionCookieName: a cookie prefix names the cookie guards look for', () => {
+  assertEquals(
+    sessionCookieName('https://auth.ensemble.blue', 'platform'),
+    '__Secure-platform.session_token',
+  )
+})
+
 Deno.test('guard manifests: the YAML round-trips to the same manifest', () => {
   const manifest = consoleGuardManifest(resolved)
   assertEquals(parse(toYaml(manifest)), manifest)

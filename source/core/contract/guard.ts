@@ -1,5 +1,5 @@
 import { stringify } from '@std/yaml'
-import type { PlacedManifest } from '@khatm/spec'
+import { DEFAULT_COOKIE_PREFIX, type PlacedManifest } from '@khatm/spec'
 import { procedures } from './procedures.ts'
 
 /** A fact a policy can use, read from the procedure's JSON body. */
@@ -68,9 +68,12 @@ const REQUIRED: ReadonlySet<string> = new Set([
   'sessions.revoke:user',
 ])
 
-/** Better Auth's session cookie name: `__Secure-` prefixed when served over https. */
-export function sessionCookieName(baseURL: string): string {
-  const name = 'better-auth.session_token'
+/** Better Auth's session cookie name for `prefix`: `__Secure-` prefixed when served over https. */
+export function sessionCookieName(
+  baseURL: string,
+  prefix: string = DEFAULT_COOKIE_PREFIX,
+): string {
+  const name = `${prefix}.session_token`
   return baseURL.startsWith('https://') ? `__Secure-${name}` : name
 }
 
@@ -81,7 +84,7 @@ function authentication(resolved: PlacedManifest) {
     session_url: session.introspectionURL,
     issuer: session.issuer,
     claims: [...session.claims],
-    cookie: sessionCookieName(baseURL),
+    cookie: sessionCookieName(baseURL, session.cookiePrefix),
   }]
 }
 

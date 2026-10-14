@@ -12,6 +12,7 @@ import {
   fromAdministration,
   fromApplications,
   fromCookieDomain,
+  fromCookiePrefix,
   fromOAuthApplications,
 } from './derivations.ts'
 import type { PluginDefinition } from './plugin-definition.ts'
@@ -158,6 +159,7 @@ export function defaultRegistry(): Registry {
     [
       fromApplications,
       fromCookieDomain,
+      fromCookiePrefix,
       fromAdministration,
       fromOAuthApplications,
     ],

@@ -81,6 +81,13 @@ export class Placement {
               'auth.session.cookieDomain',
               readings,
             ),
+          cookiePrefix: session.cookiePrefix === undefined
+            ? undefined
+            : this.required(
+              session.cookiePrefix,
+              'auth.session.cookiePrefix',
+              readings,
+            ),
           introspectionURL: this.required(
             session.introspectionURL,
             'auth.session.introspectionURL',

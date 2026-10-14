@@ -13,13 +13,9 @@ export interface SessionOptions {
    */
   readonly ttlMs?: number
   readonly timeoutMs?: number
+  /** The session contract's `cookiePrefix`, when the auth server sets one. Defaults to Better Auth's `better-auth`. */
+  readonly cookiePrefix?: string
 }
-
-/** The cookie khatm's sessions travel in; `__Secure-` prefixed when it is served over https. */
-const COOKIES = [
-  '__Secure-better-auth.session_token',
-  'better-auth.session_token',
-]
 
 const DEFAULT_CLAIMS = ['email', 'name', 'emailVerified', 'role']
 
@@ -39,16 +35,20 @@ export class Session implements MUX.Mechanism<MUX.Credentials.Cookie> {
   private readonly claims: readonly string[]
   private readonly ttlMs: number
   private readonly timeoutMs: number
+  /** The cookie khatm's sessions travel in; `__Secure-` prefixed when it is served over https. */
+  private readonly cookies: readonly string[]
 
   constructor(private readonly options: SessionOptions) {
     this.issuer = options.issuer ?? new URL(options.url).origin
     this.claims = options.claims ?? DEFAULT_CLAIMS
     this.ttlMs = options.ttlMs ?? 5_000
     this.timeoutMs = options.timeoutMs ?? 2_000
+    const name = `${options.cookiePrefix ?? 'better-auth'}.session_token`
+    this.cookies = [`__Secure-${name}`, name]
   }
 
   Extract(envelope: MUX.Envelope): MUX.Credentials.Cookie | undefined {
-    for (const name of COOKIES) {
+    for (const name of this.cookies) {
       const value = envelope.Cookie(name)
       if (value !== undefined) return new MUX.Credentials.Cookie(name, value)
     }

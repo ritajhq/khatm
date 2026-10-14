@@ -71,6 +71,9 @@ export function createAuth(
     .derived['advanced.crossSubDomainCookies']?.value as
       | { enabled: boolean; domain: string }
       | undefined
+  const cookiePrefix = resolved.derived['advanced.cookiePrefix']?.value as
+    | string
+    | undefined
 
   const database = openDatabase(
     spec.database,
@@ -94,9 +97,9 @@ export function createAuth(
         buildPlugin(plugin.kind, plugin.options)
       ),
     ],
-    advanced: crossSubDomainCookies === undefined
+    advanced: crossSubDomainCookies === undefined && cookiePrefix === undefined
       ? undefined
-      : { crossSubDomainCookies },
+      : { crossSubDomainCookies, cookiePrefix },
     logger: options.quiet ? { disabled: true } : undefined,
   }
 

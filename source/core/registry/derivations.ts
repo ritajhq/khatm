@@ -45,6 +45,20 @@ export const fromCookieDomain: Derivation = {
   },
 }
 
+/** Better Auth's cookie prefix, from the session contract's. */
+export const fromCookiePrefix: Derivation = {
+  derive(manifest: Manifest): Record<string, Derived> {
+    const prefix = manifest.auth.session.cookiePrefix
+    if (prefix === undefined) return {}
+    return {
+      'advanced.cookiePrefix': {
+        value: prefix,
+        derivedFrom: 'auth.session.cookiePrefix',
+      },
+    }
+  },
+}
+
 /**
  * The admin plugin, always: khatm administers identities through it, as its
  * service user, and the `role` claim is its column. Nothing in khatm checks a

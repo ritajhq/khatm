@@ -37,6 +37,21 @@ Deno.test('Registry: resolves portal, deriving what portal wires by hand today',
   })
 })
 
+Deno.test("Registry: a session cookie prefix becomes Better Auth's", () => {
+  const resolved = registry.resolve(portal({
+    session: {
+      cookiePrefix: 'platform',
+      introspectionURL: 'http://auth:4100/api/auth/get-session',
+      issuer: 'platform',
+      claims: ['email'],
+    },
+  }))
+  assertEquals(resolved.derived['advanced.cookiePrefix'], {
+    value: 'platform',
+    derivedFrom: 'auth.session.cookiePrefix',
+  })
+})
+
 Deno.test('Registry: the first first-party app lands when none is marked', () => {
   const resolved = registry.resolve(portal({
     applications: [
