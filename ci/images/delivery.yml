@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ritajhq/ensemble/refs/heads/main/docs/delivery.schema.json
+version: v1
+
+# khatm's own image, published with every release for others to build on:
+# FROM it, with their manifest baked in at /config/manifest.json. Pushing
+# needs docker logged in to ghcr.io with a token that may write packages.
+release:
+  khatm:
+    kit: docker
+    mode: image
+    publish:
+      target: push
+      name: ghcr.io/ritajhq/khatm/khatm
