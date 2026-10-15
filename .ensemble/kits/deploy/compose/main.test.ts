@@ -209,6 +209,16 @@ Deno.test("compose kit: watchCommand runs docker compose watch scoped by the dep
   );
 });
 
+Deno.test("compose kit: a quiet watchCommand drops compose's progress display, which it writes to stderr beside real errors", async () => {
+  const command = await composeKit.watchCommand?.(
+    "/repo/source/artifacts/deploy/website/compose.yaml",
+    "website",
+    { quiet: true },
+  );
+
+  assertEquals(command?.slice(-3), ["--progress", "quiet", "watch"]);
+});
+
 const WITH_SHARED_PORT = `
 version: v1
 release:
@@ -708,7 +718,7 @@ Deno.test("compose kit: a gateway with ingress networks renders as a Caddy servi
     services: Record<string, {
       image: string;
       ports?: string[];
-      networks?: string[];
+      networks?: Record<string, unknown>;
       configs?: unknown[];
       volumes?: string[];
     }>;
@@ -723,8 +733,13 @@ Deno.test("compose kit: a gateway with ingress networks renders as a Caddy servi
   assertEquals(document.services.gateway.ports, undefined);
   // Both networks: the manifest's own ingress network, plus the project's,
   // which is where every compute it routes to actually lives — a proxy can
-  // only reach an upstream it shares a network with.
-  assertEquals(document.services.gateway.networks, ["edge", "default"]);
+  // only reach an upstream it shares a network with. On the ingress network
+  // it answers to its compose project's name, which compose fills in at
+  // apply time, since no alias was given.
+  assertEquals(document.services.gateway.networks, {
+    edge: { aliases: ["${COMPOSE_PROJECT_NAME}"] },
+    default: null,
+  });
   assertEquals(document.services.gateway.configs, [
     { source: "gateway-caddyfile", target: "/etc/caddy/Caddyfile" },
   ]);
@@ -747,6 +762,26 @@ Deno.test("compose kit: a gateway with ingress networks renders as a Caddy servi
     ),
     true,
   );
+});
+
+Deno.test("compose kit: a gateway with an alias carries it on every ingress network, so stacks sharing one network stay individually addressable", async () => {
+  const aliased = WITH_GATEWAY.replace(
+    "      type: gateway",
+    "      type: gateway\n      alias: feat-foo",
+  );
+  const workload = new KitSdk.Deploy.Manifest.Parser().parse(aliased);
+  const { artifacts, graph } = await renderNetworkingWorkload(workload);
+  const document = assembleComposeDocument(artifacts, graph) as {
+    services: Record<string, { networks?: Record<string, unknown> }>;
+    networks?: Record<string, unknown>;
+  };
+
+  assertEquals(document.services.gateway.networks, {
+    edge: { aliases: ["feat-foo"] },
+    default: null,
+  });
+  // The map form still declares only the external network.
+  assertEquals(document.networks, { edge: { external: true } });
 });
 
 Deno.test("compose kit: a gateway declares an apply-time init command that loads its Caddyfile through Caddy's admin API, since compose never recreates a container whose inline config alone changed", async () => {
@@ -839,7 +874,10 @@ async function renderGatewayWithNetworks(value: string) {
     );
     const { artifacts, graph } = await renderNetworkingWorkload(workload);
     return assembleComposeDocument(artifacts, graph) as {
-      services: Record<string, { ports?: string[]; networks?: string[] }>;
+      services: Record<
+        string,
+        { ports?: string[]; networks?: string[] | Record<string, unknown> }
+      >;
       networks?: Record<string, unknown>;
     };
   } finally {
@@ -859,8 +897,35 @@ Deno.test("compose kit: a gateway whose list variable names a network joins it a
   const document = await renderGatewayWithNetworks("edge");
 
   assertEquals(document.services.gateway.ports, undefined);
-  assertEquals(document.services.gateway.networks, ["edge", "default"]);
+  assertEquals(document.services.gateway.networks, {
+    edge: { aliases: ["${COMPOSE_PROJECT_NAME}"] },
+    default: null,
+  });
   assertEquals(document.networks, { edge: { external: true } });
+});
+
+Deno.test("compose kit: a gateway on an ingress network reports where a router reaches it there, leaving its alias to the deployment's name unless one was given", async () => {
+  const workload = new KitSdk.Deploy.Manifest.Parser().parse(WITH_GATEWAY);
+  const { artifacts } = await renderNetworkingWorkload(workload);
+
+  assertEquals(artifacts.entrypoints, undefined);
+  assertEquals(artifacts.ingresses, [{
+    service: "gateway",
+    networks: ["edge"],
+    scheme: "http",
+    port: 80,
+    hosts: ["example.localhost"],
+  }]);
+
+  const aliased = await renderNetworkingWorkload(
+    new KitSdk.Deploy.Manifest.Parser().parse(
+      WITH_GATEWAY.replace(
+        "      type: gateway",
+        "      type: gateway\n      alias: feat-foo",
+      ),
+    ),
+  );
+  assertEquals(aliased.artifacts.ingresses?.[0].alias, "feat-foo");
 });
 
 Deno.test("compose kit: rendering the same workload twice produces byte-identical presented content (G5)", async () => {

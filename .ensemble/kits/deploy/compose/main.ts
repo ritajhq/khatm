@@ -49,7 +49,19 @@ const kit: KitSdk.Deploy.Kit = {
     name,
   ) => ["docker", "compose", "-f", artifactPath, "-p", name, "up", "-d"],
   // deno-lint-ignore require-await
-  watchCommand: async (artifactPath, name) => [
+  destroyCommand: async (name) => [
+    "docker",
+    "compose",
+    "-p",
+    name,
+    "down",
+    "--volumes",
+    "--remove-orphans",
+  ],
+  // deno-lint-ignore require-await
+  // `--progress quiet` drops compose's own progress display, which it writes
+  // to stderr alongside real errors; those still come through.
+  watchCommand: async (artifactPath, name, options) => [
     "docker",
     "compose",
     "-f",
@@ -58,6 +70,7 @@ const kit: KitSdk.Deploy.Kit = {
     name,
     "--project-directory",
     artifactsDirFor(artifactPath),
+    ...(options?.quiet ? ["--progress", "quiet"] : []),
     "watch",
   ],
   emulateExternals: externalNetworkEmulations,

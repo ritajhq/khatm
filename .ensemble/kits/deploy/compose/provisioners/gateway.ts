@@ -1,6 +1,12 @@
 import * as KitSdk from "@ensemble/kit-sdk";
 import { PROJECT_NETWORK } from "../compose-document.ts";
-import { caddyfile, type Tls, tlsMode } from "./caddy-config.ts";
+import {
+  caddyfile,
+  type Route,
+  routeMatch,
+  type Tls,
+  tlsMode,
+} from "./caddy-config.ts";
 
 /**
  * Caddy's own official image, and the reason this kit's gateway is Caddy:
@@ -12,14 +18,52 @@ import { caddyfile, type Tls, tlsMode } from "./caddy-config.ts";
  * case that trades little for it.
  */
 const CADDY_IMAGE = "caddy:2.11-alpine";
-/** The host port an HTTPS gateway is reached on, mapping Caddy's own 443 — the port every app's own origins in this repo already spell (`https://<host>.localhost:8443`). */
-const HTTPS_HOST_PORT = 8443;
 
-/** What the gateway publishes on the host when nothing fronts it, per `Tls` — see `gatewayProvisioner` for why HTTPS publishes 8443 alone. */
-const PUBLISHED_PORTS: Readonly<Record<Tls, readonly string[]>> = {
-  internal: [`${HTTPS_HOST_PORT}:443`],
-  none: ["80:80"],
+interface HostListener {
+  readonly scheme: "http" | "https";
+  readonly hostPort: number;
+  readonly containerPort: number;
+}
+
+/**
+ * How the gateway is reached on the host when nothing fronts it, per `Tls` —
+ * see `gatewayProvisioner` for why HTTPS publishes 8443 alone. 8443 maps
+ * Caddy's own 443 and is the port every app's own origins in this repo
+ * already spell (`https://<host>.localhost:8443`).
+ */
+const HOST_LISTENERS: Readonly<Record<Tls, HostListener>> = {
+  internal: { scheme: "https", hostPort: 8443, containerPort: 443 },
+  none: { scheme: "http", hostPort: 80, containerPort: 80 },
 };
+
+/**
+ * One entrypoint per distinct (service, host) pair, in declaration order, with
+ * every path routed there: what `ens develop` lists as the links to open. A
+ * route with no host is Caddy's catch-all, reached as `localhost`; a default
+ * port (80 over plain HTTP) is left out of the URL, as a browser would.
+ */
+export function gatewayEntrypoints(
+  routes: readonly Route[],
+  tls: Tls,
+): KitSdk.Deploy.Render.Entrypoint[] {
+  const { scheme, hostPort } = HOST_LISTENERS[tls];
+  const entrypoints = new Map<
+    string,
+    { service: string; url: string; paths: string[] }
+  >();
+  for (const route of routes) {
+    const host = route.host || "localhost";
+    const key = `${route.target.service} ${host}`;
+    const entrypoint = entrypoints.get(key) ?? {
+      service: route.target.service,
+      url: new URL(`${scheme}://${host}:${hostPort}`).origin,
+      paths: [],
+    };
+    entrypoint.paths.push(routeMatch(route));
+    entrypoints.set(key, entrypoint);
+  }
+  return [...entrypoints.values()];
+}
 
 /**
  * Narrows a gateway's resolved `networks` param to its network names: absent
@@ -102,6 +146,61 @@ done
 exit 1`;
 }
 
+/**
+ * The name a gateway answers to on its ingress networks when the manifest
+ * gives it no `alias`: its compose project's own, which compose interpolates
+ * from `-p` at apply time — the deployment name, unique per checkout and
+ * instance. Left to compose rather than rendered, since the render never
+ * knows it, and so the committed artifact stays the same for every instance.
+ */
+export const PROJECT_ALIAS = "${COMPOSE_PROJECT_NAME}";
+
+/**
+ * What the gateway's `networks` entry renders: the plain list when it joins
+ * no ingress network, otherwise a map putting its alias on every ingress
+ * network. Every gateway's service is named alike (`gateway`), so several
+ * stacks sharing one ingress network would otherwise answer each other's
+ * lookups for it; the alias is what lets one router reach exactly one of
+ * them. The project's own network keeps its default name only: the alias is
+ * for whatever reaches in from the ingress network.
+ */
+function networkAttachments(
+  ingress: readonly string[],
+  alias: string,
+): readonly string[] | Record<string, unknown> {
+  if (ingress.length === 0) return [PROJECT_NETWORK];
+  return {
+    ...Object.fromEntries(ingress.map((name) => [name, { aliases: [alias] }])),
+    [PROJECT_NETWORK]: null,
+  };
+}
+
+/**
+ * Where a router on the gateway's ingress networks reaches it: Caddy's own
+ * listener for `tls` (nothing is published, so the container port is the
+ * one), and every distinct host its routes match, in declaration order. No
+ * `alias` when the manifest gave none: the gateway then answers to its
+ * deployment's name (`PROJECT_ALIAS`), which whoever records the deployment
+ * fills in.
+ */
+export function gatewayIngress(
+  service: string,
+  networks: readonly string[],
+  alias: string | undefined,
+  routes: readonly Route[],
+  tls: Tls,
+): KitSdk.Deploy.Render.Ingress {
+  const { scheme, containerPort } = HOST_LISTENERS[tls];
+  return {
+    service,
+    networks,
+    ...(alias === undefined ? {} : { alias }),
+    scheme,
+    port: containerPort,
+    hosts: [...new Set(routes.map((route) => route.host))],
+  };
+}
+
 export function gatewayProvisioner(): KitSdk.Deploy.Provisioner {
   return {
     // deno-lint-ignore require-await
@@ -112,10 +211,12 @@ export function gatewayProvisioner(): KitSdk.Deploy.Provisioner {
     provision: async (request) => {
       const configName = `${request.name}-caddyfile`;
       const volumeName = `${request.name}-data`;
-      const routes = request.params.routes as Parameters<typeof caddyfile>[0];
+      const routes = request.params.routes as readonly Route[];
       const tls = tlsMode(request.params.tls);
       const ingress = ingressNetworks(request.params.networks);
+      const alias = request.params.alias as string | undefined;
       const config = caddyfile(routes, tls);
+      const listener = HOST_LISTENERS[tls];
 
       return {
         fragment: {
@@ -125,9 +226,9 @@ export function gatewayProvisioner(): KitSdk.Deploy.Provisioner {
             service: {
               image: CADDY_IMAGE,
               ...(ingress.length === 0
-                ? { ports: [...PUBLISHED_PORTS[tls]] }
+                ? { ports: [`${listener.hostPort}:${listener.containerPort}`] }
                 : {}),
-              networks: [...ingress, PROJECT_NETWORK],
+              networks: networkAttachments(ingress, alias ?? PROJECT_ALIAS),
               configs: [
                 { source: configName, target: "/etc/caddy/Caddyfile" },
               ],
@@ -144,6 +245,13 @@ export function gatewayProvisioner(): KitSdk.Deploy.Provisioner {
           name: `${request.name}-caddy-reload`,
           run: caddyReloadScript(request.name, config),
         }],
+        ...(ingress.length === 0
+          ? { entrypoints: gatewayEntrypoints(routes, tls) }
+          : {
+            ingresses: [
+              gatewayIngress(request.name, ingress, alias, routes, tls),
+            ],
+          }),
       };
     },
   };

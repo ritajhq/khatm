@@ -17,14 +17,29 @@ const dependencies = await referencedApps(ctx.ship, ctx.apps);
 
 const artifactContextArgs: string[] = [];
 for (const app of dependencies) {
-  artifactContextArgs.push("--build-context", `${app}=${join(ctx.artifacts, app)}`);
+  artifactContextArgs.push(
+    "--build-context",
+    `${app}=${join(ctx.artifacts, app)}`,
+  );
 }
+
+// The ship's pack vars (`envs/pack/<ship>.env`, local config), as build args:
+// what lets one Dockerfile be built from wherever its base image comes from
+// (`ARG GUARD_IMAGE=ghcr.io/…` then `FROM ${GUARD_IMAGE}`), the default kept
+// in the Dockerfile and a host's own source in its vars. A Dockerfile only
+// sees the args it declares; a var it doesn't is left unused.
+const buildArgs = Object.entries(ctx.vars).flatMap(([name, value]) => [
+  "--build-arg",
+  `${name}=${value}`,
+]);
 
 const modes = await KitSdk.Pack.loadModes(kitDir);
 const format = modes[ctx.mode];
 if (!format) {
   const available = Object.keys(modes).join(", ") || "(none declared)";
-  throw new Error(`Unknown mode "${ctx.mode}" for the docker kit. Available modes: ${available}`);
+  throw new Error(
+    `Unknown mode "${ctx.mode}" for the docker kit. Available modes: ${available}`,
+  );
 }
 
 // ctx.outputName (the ship name by default, but overridable via
@@ -62,6 +77,7 @@ const build = $`docker buildx build
   --tag ${ctx.outputName}
   --build-context packages=${ctx.packages}
   ${artifactContextArgs}
+  ${buildArgs}
   --output ${output}
   ${allowArgs}
   ${progressArgs}
